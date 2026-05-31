@@ -270,6 +270,8 @@ struct CallScreenView: View {
     let rendererProvider: CallRendererProvider
     let initialRemoteVideoFitCover: Bool
     let onRemoteVideoFitChanged: ((Bool) -> Void)?
+    let onSystemPictureInPictureSourceChanged: ((SystemPictureInPictureSource) -> Void)?
+    let onSystemPictureInPictureSourceFrameChanged: ((CGRect?) -> Void)?
 
     @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var areControlsVisible = true
@@ -306,7 +308,9 @@ struct CallScreenView: View {
         onSnapshotRequested: ((SnapshotSource) -> Void)? = nil,
         rendererProvider: CallRendererProvider,
         initialRemoteVideoFitCover: Bool = true,
-        onRemoteVideoFitChanged: ((Bool) -> Void)? = nil
+        onRemoteVideoFitChanged: ((Bool) -> Void)? = nil,
+        onSystemPictureInPictureSourceChanged: ((SystemPictureInPictureSource) -> Void)? = nil,
+        onSystemPictureInPictureSourceFrameChanged: ((CGRect?) -> Void)? = nil
     ) {
         self.roomId = roomId
         self.uiState = uiState
@@ -328,6 +332,8 @@ struct CallScreenView: View {
         self.rendererProvider = rendererProvider
         self.initialRemoteVideoFitCover = initialRemoteVideoFitCover
         self.onRemoteVideoFitChanged = onRemoteVideoFitChanged
+        self.onSystemPictureInPictureSourceChanged = onSystemPictureInPictureSourceChanged
+        self.onSystemPictureInPictureSourceFrameChanged = onSystemPictureInPictureSourceFrameChanged
         _remoteVideoFitCover = State(initialValue: initialRemoteVideoFitCover)
         _isControlsAutoHideEnabled = State(initialValue: config.autoHideControls)
         _areControlsVisible = State(initialValue: true)
@@ -355,6 +361,13 @@ struct CallScreenView: View {
             localCameraMode: uiState.localCameraMode
         )
         let shouldRunAutoHideTask = areControlsVisible && uiState.phase == .inCall && isControlsAutoHideEnabled
+        let systemPictureInPictureSource = selectSystemPictureInPictureSource(
+            localSourceId: uiState.localCid,
+            localIsPrimary: !isMultiParty && showLocalAsPrimarySurface,
+            localVideoEnabled: uiState.localVideoEnabled,
+            remoteParticipants: uiState.remoteParticipants,
+            preferredSourceIds: isMultiParty ? [pinnedParticipantId] : []
+        )
 
         ZStack {
             Color.black.ignoresSafeArea()
@@ -362,8 +375,10 @@ struct CallScreenView: View {
             if uiState.phase == .waiting {
                 if showLocalAsPrimarySurface {
                     largeLocalView
+                        .systemPictureInPictureSourceFrame(onChange: onSystemPictureInPictureSourceFrameChanged)
                 } else {
                     waitingMainSurface
+                        .systemPictureInPictureSourceFrame(onChange: onSystemPictureInPictureSourceFrameChanged)
                     smallLocalView
                 }
             } else if isMultiParty {
@@ -401,8 +416,10 @@ struct CallScreenView: View {
                         }
                     }
                 )
+                .systemPictureInPictureSourceFrame(onChange: onSystemPictureInPictureSourceFrameChanged)
             } else if showLocalAsPrimarySurface {
                 largeLocalView
+                    .systemPictureInPictureSourceFrame(onChange: onSystemPictureInPictureSourceFrameChanged)
                 smallRemoteView
             } else {
                 let inCall = uiState.phase == .inCall
@@ -426,6 +443,7 @@ struct CallScreenView: View {
                     )
                 }
                 .padding(.bottom, areControlsVisible ? pipBottomPadding(isLandscape: isLandscape, areControlsVisible: true) + 4 : 0)
+                .systemPictureInPictureSourceFrame(onChange: onSystemPictureInPictureSourceFrameChanged)
                 smallLocalView
             }
 
@@ -467,6 +485,9 @@ struct CallScreenView: View {
         }
         .onChange(of: remoteVideoFitCover) { value in
             onRemoteVideoFitChanged?(value)
+        }
+        .task(id: systemPictureInPictureSource) {
+            onSystemPictureInPictureSourceChanged?(systemPictureInPictureSource)
         }
         .task(id: uiState.connectionStatus == .recovering && uiState.phase == .inCall) {
             guard uiState.connectionStatus == .recovering, uiState.phase == .inCall else { return }

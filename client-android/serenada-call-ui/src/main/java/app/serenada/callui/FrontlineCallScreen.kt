@@ -154,6 +154,7 @@ internal fun FrontlineCallScreen(
     strings: Map<SerenadaString, String>?,
     availableAudioDevices: List<AudioDevice>,
     currentAudioDevice: AudioDevice?,
+    isSystemPictureInPicture: Boolean = false,
     onToggleAudio: () -> Unit,
     onToggleVideo: () -> Unit,
     onFlipCamera: () -> Unit,
@@ -259,6 +260,7 @@ internal fun FrontlineCallScreen(
         }
     val largeFeed = if (localIsLarge) FrontlineFeed.Local else FrontlineFeed.Remote
     val pipFeed = when {
+        isSystemPictureInPicture -> null
         !uiState.localVideoEnabled && !remoteVideoEnabled -> null
         largeFeed == FrontlineFeed.Local -> FrontlineFeed.Remote
         else -> FrontlineFeed.Local
@@ -290,6 +292,7 @@ internal fun FrontlineCallScreen(
     val showAudioRouteControl = currentAudioRoute != null || audioRouteOptions.isNotEmpty()
     val showMoreButton =
         isCallSurfacePhase &&
+            !isSystemPictureInPicture &&
             (showAudioRouteControl || config.screenSharingEnabled || config.inviteControlsEnabled)
     val moreOpensAudioRouteDirectly =
         frontlineMoreMenuOpensAudioRouteDirectly(
@@ -322,6 +325,13 @@ internal fun FrontlineCallScreen(
     val showReconnectingBadge =
         uiState.phase == CallPhase.InCall &&
             uiState.connectionStatus != ConnectionStatus.Connected
+    LaunchedEffect(isSystemPictureInPicture) {
+        if (isSystemPictureInPicture) {
+            isMoreSheetVisible = false
+            isAudioRouteSheetVisible = false
+            showDebug = false
+        }
+    }
     LaunchedEffect(activeContentSpotlightId) {
         if (activeContentSpotlightId != null) {
             selectedSpotlightId = activeContentSpotlightId
@@ -431,7 +441,38 @@ internal fun FrontlineCallScreen(
                     }
                 }
 
-                if (isLandscape) {
+                if (isSystemPictureInPicture) {
+                    val remoteCids = uiState.remoteParticipants.map { it.cid }.toSet()
+                    val systemPipRemoteCid =
+                        listOf(pinnedSpotlightId, selectedSpotlightId, lastVideoStartedParticipantId)
+                            .firstNotNullOfOrNull { spotlightId ->
+                                when {
+                                    spotlightId == null -> null
+                                    spotlightId in remoteCids -> spotlightId
+                                    spotlightId.isFrontlineContentSpotlightId() -> {
+                                        spotlightId
+                                            .removePrefix(FRONTLINE_CONTENT_SPOTLIGHT_PREFIX)
+                                            .takeIf { it in remoteCids }
+                                    }
+                                    else -> null
+                                }
+                            } ?: remote?.cid
+                    SystemPictureInPictureContent(
+                        uiState = uiState,
+                        feed = selectSystemPictureInPictureFeed(
+                            localIsLarge = largeFeed == FrontlineFeed.Local,
+                            localVideoEnabled = uiState.localVideoEnabled,
+                            remoteCid = systemPipRemoteCid,
+                        ),
+                        eglContext = eglContext,
+                        localContentScale = if (uiState.isScreenSharing) ContentScale.Fit else ContentScale.Crop,
+                        remoteContentScale = if (remoteVideoFitCover) ContentScale.Crop else ContentScale.Fit,
+                        attachLocalSink = attachLocalSink,
+                        detachLocalSink = detachLocalSink,
+                        attachRemoteSinkForCid = attachRemoteSinkForCid,
+                        detachRemoteSinkForCid = detachRemoteSinkForCid,
+                    )
+                } else if (isLandscape) {
                     Row(Modifier.fillMaxSize()) {
                         FrontlineContentArea(
                             uiState = uiState,
@@ -562,7 +603,7 @@ internal fun FrontlineCallScreen(
                 }
 
                 AnimatedVisibility(
-                    visible = showReconnectingBadge,
+                    visible = showReconnectingBadge && !isSystemPictureInPicture,
                     enter = fadeIn(),
                     exit = fadeOut(),
                     modifier = Modifier
@@ -596,7 +637,7 @@ internal fun FrontlineCallScreen(
                     }
                 }
 
-                if (showSnapshotFlash) {
+                if (showSnapshotFlash && !isSystemPictureInPicture) {
                     LaunchedEffect(Unit) {
                         delay(220)
                         showSnapshotFlash = false
@@ -609,7 +650,7 @@ internal fun FrontlineCallScreen(
                     )
                 }
 
-                if (config.debugOverlayEnabled) {
+                if (config.debugOverlayEnabled && !isSystemPictureInPicture) {
                     Box(
                         modifier = Modifier
                             .align(Alignment.TopStart)

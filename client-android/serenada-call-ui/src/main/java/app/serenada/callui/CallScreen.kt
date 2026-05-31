@@ -119,6 +119,7 @@ internal fun CallScreen(
     config: SerenadaCallFlowConfig = SerenadaCallFlowConfig(),
     theme: SerenadaCallFlowTheme = SerenadaCallFlowTheme(),
     strings: Map<SerenadaString, String>? = null,
+    isSystemPictureInPicture: Boolean = false,
     onToggleAudio: () -> Unit,
     onToggleVideo: () -> Unit,
     onFlipCamera: () -> Unit,
@@ -294,12 +295,36 @@ internal fun CallScreen(
     // remote-as-large so the user doesn't see a giant "Camera off" placeholder.
     // The user's swap preference (`isLocalLarge`) is preserved and reapplied
     // automatically when video comes back on.
-    val effectiveLocalLarge = isLocalLarge && uiState.localVideoEnabled
+    val effectiveLocalLarge =
+        isLocalLarge && uiState.localVideoEnabled
 
     val avatarCache = rememberAvatarCache(config.avatarProvider)
 
     SerenadaTheme(theme) {
       androidx.compose.runtime.CompositionLocalProvider(LocalAvatarCache provides avatarCache) {
+        if (isSystemPictureInPicture) {
+            val systemPipRemoteCid =
+                pinnedParticipantId?.takeIf { pinned ->
+                    uiState.remoteParticipants.any { participant -> participant.cid == pinned }
+                } ?: uiState.remoteParticipants.firstOrNull()?.cid
+            val feed =
+                selectSystemPictureInPictureFeed(
+                    localIsLarge = effectiveLocalLarge,
+                    localVideoEnabled = uiState.localVideoEnabled,
+                    remoteCid = systemPipRemoteCid,
+                )
+            SystemPictureInPictureContent(
+                uiState = uiState,
+                feed = feed,
+                eglContext = eglContext,
+                localContentScale = if (uiState.isScreenSharing) ContentScale.Fit else ContentScale.Crop,
+                remoteContentScale = if (remoteVideoFitCover) ContentScale.Crop else ContentScale.Fit,
+                attachLocalSink = attachLocalSink,
+                detachLocalSink = detachLocalSink,
+                attachRemoteSinkForCid = attachRemoteSinkForCid,
+                detachRemoteSinkForCid = detachRemoteSinkForCid,
+            )
+        } else {
         BoxWithConstraints(
             modifier =
                 Modifier.fillMaxSize().background(theme.backgroundColor)
@@ -771,18 +796,22 @@ internal fun CallScreen(
             }
 
             val snapshotIcon: @Composable () -> Unit = {
-                if (showSnapshotButton && snapshotHandler != null && snapshotSource != null) {
-                    IconButton(
-                        onClick = { snapshotHandler(snapshotSource) },
-                        modifier = Modifier.size(44.dp)
-                            .background(Color.Black.copy(alpha = 0.4f), CircleShape)
-                            .testTag("call.takeSnapshot")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PhotoCamera,
-                            contentDescription = resolveString(SerenadaString.CallTakeSnapshot, strings),
-                            tint = Color.White
-                        )
+                if (areControlsVisible) {
+                    snapshotHandler?.let { handler ->
+                        snapshotSource?.let { source ->
+                            IconButton(
+                                onClick = { handler(source) },
+                                modifier = Modifier.size(44.dp)
+                                    .background(Color.Black.copy(alpha = 0.4f), CircleShape)
+                                    .testTag("call.takeSnapshot")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.PhotoCamera,
+                                    contentDescription = resolveString(SerenadaString.CallTakeSnapshot, strings),
+                                    tint = Color.White
+                                )
+                            }
+                        }
                     }
                 }
             }
@@ -921,6 +950,7 @@ internal fun CallScreen(
             }
         }
 
+        }
         }
       }
     }
@@ -1513,7 +1543,7 @@ private fun MultiPartyStage(
                 val topChromePx = with(density) { 20.dp.toPx() }
                 val bottomChromePx = with(density) { (bottomPadding + 4.dp).toPx() }
 
-                if (useComputedLayout && localCid != null) {
+                if (useComputedLayout) {
                 // Focus/content mode: use computeLayout for primary + filmstrip rendering
                 val contentSource = if (hasLocalContent) {
                     val type = when {
