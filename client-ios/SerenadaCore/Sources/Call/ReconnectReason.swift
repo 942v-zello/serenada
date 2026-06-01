@@ -1,7 +1,7 @@
 import Foundation
 
 /// Reconnect-reason mapping — a direct port of the cross-platform **reference**
-/// table (`client/packages/core/src/media/reconnectReason.ts`, telemetry §5.1).
+/// table (`client/packages/core/src/media/reconnectReason.ts`).
 /// Keyed on the **server signaling error code** so the single shared
 /// `reconnectFailed.reason` analytics column is classified identically on every
 /// platform. A code not in the table is *not* a recovery-abandonment path and

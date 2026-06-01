@@ -1,6 +1,6 @@
 import Foundation
 
-/// Owns the cross-platform call-quality algorithm (telemetry §5). Driven by
+/// Owns the cross-platform call-quality algorithm. Driven by
 /// **explicit inputs** — never by reading session state after the fact:
 /// `onStatsSample`, `onConnectionStatusTransition`, `onPhaseTransition`,
 /// `finalize`. Produces an immutable ``CallQualitySummary``, live during the
@@ -9,7 +9,7 @@ import Foundation
 /// Sampling begins only at the first `.inCall` transition — pre-call samples
 /// (during joining/waiting) must not contaminate MOS or the medians. Samples
 /// arriving while a dropout is open are **skipped** so the degraded shoulder
-/// RTT/jitter don't skew the steady-state medians + MOS (telemetry §5.2).
+/// RTT/jitter don't skew the steady-state medians + MOS.
 ///
 /// Port of the web reference `CallQualityTracker.ts`; behavior locked by the
 /// shared dropout/median unit tests + the MOS golden vector.
@@ -20,7 +20,7 @@ final class CallQualityTracker {
     private var inCallStartedAtMs: Int64?
 
     // Streaming medians keep cost O(log n) per sample instead of re-sorting
-    // the full history on every recompute (telemetry §5.2).
+    // the full history on every recompute.
     private var latency = StreamingMedian()
     private var jitter = StreamingMedian()
     private var qualitySampleCount = 0
@@ -46,7 +46,7 @@ final class CallQualityTracker {
 
     /// Feed a fresh stats sample. Ignored before first inCall, after finalize,
     /// and while a dropout is open (the degraded-window RTT/jitter would skew
-    /// the steady-state medians + MOS, telemetry §5.2).
+    /// the steady-state medians + MOS).
     func onStatsSample(_ stats: RealtimeCallStats, nowMs: Int64) {
         guard !finalized, let startedAt = inCallStartedAtMs, nowMs >= startedAt else { return }
         guard dropoutOpenSinceMs == nil else { return }
@@ -87,7 +87,7 @@ final class CallQualityTracker {
     /// `.inCall` (e.g. the remote peer departs) closes any open dropout
     /// *silently* — that forced `-> .connected` reset is a peer-departure, not
     /// a link recovery, so it must not emit a phantom `reconnected` or inflate
-    /// `countReconnects` (telemetry §5.1).
+    /// `countReconnects`.
     func onPhaseTransition(_ next: CallPhase, nowMs: Int64) {
         guard !finalized else { return }
         if next == .inCall {

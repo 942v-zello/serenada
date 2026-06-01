@@ -97,7 +97,7 @@ internal class StatsPoller(
                 videoFreezeDuration60s = sumN { it.videoFreezeDuration60s },
                 videoRetransmitPct = maxN { it.videoRetransmitPct }, videoNackPerMin = sumN { it.videoNackPerMin },
                 videoPliPerMin = sumN { it.videoPliPerMin }, videoFirPerMin = sumN { it.videoFirPerMin },
-                // Telemetry §5.2/§5.3: sum cumulative counters across slots
+                // Sum cumulative counters across slots
                 // (null when no slot reported the kind). CallQualityTracker /
                 // the host segment diff rebaseline when the *aggregate* delta
                 // goes negative (counter reset / slot teardown). In the

@@ -5,7 +5,7 @@ internal interface SessionClock {
     fun nowMs(): Long
 
     /**
-     * Monotonic milliseconds for interval math (telemetry §5.1): unaffected by
+     * Monotonic milliseconds for interval math: unaffected by
      * a wall-clock / NTP step, so a backward correction during an open dropout
      * can't record a real outage as 0ms. Production uses
      * `SystemClock.elapsedRealtime()`.

@@ -2,8 +2,7 @@
  * MOS (Mean Opinion Score) heuristic — the cross-platform **reference**
  * implementation. The Android (`Mos.kt`) and iOS (`Mos.swift`) ports must
  * reproduce this formula exactly; parity is locked by a checked-in golden
- * test vector asserted identically in all three core test suites (see
- * `docs/telemetry/00-overview.md` §5.4).
+ * test vector asserted identically in all three core test suites.
  *
  * Simplified ITU-T G.107 E-model → MOS mapping, computed at call end from
  * the call-level medians. Do not change a coefficient without regenerating

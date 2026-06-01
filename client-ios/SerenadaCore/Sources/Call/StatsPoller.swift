@@ -123,7 +123,7 @@ final class StatsPoller {
         merged.videoNackPerMin = sumNonNil(stats.compactMap(\.videoNackPerMin))
         merged.videoPliPerMin = sumNonNil(stats.compactMap(\.videoPliPerMin))
         merged.videoFirPerMin = sumNonNil(stats.compactMap(\.videoFirPerMin))
-        // Telemetry §5.2/§5.3: sum cumulative counters across slots (nil when
+        // Sum cumulative counters across slots (nil when
         // no slot reported the kind). CallQualityTracker / the host segment
         // diff rebaseline when the *aggregate* delta goes negative (counter
         // reset / slot teardown). In the dominant 1:1 case there is a single

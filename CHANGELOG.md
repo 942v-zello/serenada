@@ -7,8 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [0.8.0] — 2026-05-31
 
 ### Added
-- Web, Android, iOS: call-quality telemetry surface for host analytics
-  (redacted-ticket). A new `CallQualitySummary` (MOS estimate, audio packet
+- Web, Android, iOS: call-quality telemetry surface for host analytics.
+  A new `CallQualitySummary` (MOS estimate, audio packet
   loss, median latency/jitter, disconnect/reconnect counts, total
   dropout duration) is computed by the SDK, updated live and finalized
   at call end, and exposed to the host (`callQualitySummary`). A

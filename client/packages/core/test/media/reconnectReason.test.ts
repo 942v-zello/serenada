@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { reconnectFailedReasonForCode } from '../../src/media/reconnectReason.js';
 
 /**
- * Reconnect-reason table — the cross-platform source of truth (telemetry
- * §5.1). Android (`ReconnectReasonTest.kt`) and iOS (`ReconnectReasonTests`)
+ * Reconnect-reason table — the cross-platform source of truth.
+ * Android (`ReconnectReasonTest.kt`) and iOS (`ReconnectReasonTests`)
  * assert the SAME mapping; parity across the three tables is additionally
  * guarded by `scripts/check-telemetry-parity.mjs`.
  */

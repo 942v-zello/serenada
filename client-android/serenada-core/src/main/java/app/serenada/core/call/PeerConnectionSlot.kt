@@ -72,7 +72,7 @@ internal class PeerConnectionSlot(
         var remoteInboundPacketsLost: Long = 0L,
         // Number of inbound-rtp stats seen for this kind. Distinguishes a
         // genuine 0 from "no inbound-rtp stat" so telemetry counters surface
-        // null (unknown) rather than a fake 0 (telemetry §5.2/§5.3).
+        // null (unknown) rather than a fake 0.
         var inboundRtpCount: Int = 0,
         // Per-counter presence. A row can exist (inboundRtpCount > 0) yet omit
         // a specific member; surface null for that member alone, not a fake 0.
@@ -1100,7 +1100,7 @@ internal class PeerConnectionSlot(
             videoNackPerMin = videoNackPerMin,
             videoPliPerMin = videoPliPerMin,
             videoFirPerMin = videoFirPerMin,
-            // Telemetry §5.2/§5.3: null (unknown) when the specific counter
+            // Null (unknown) when the specific counter
             // member was never present, never a fake 0. Per-field presence,
             // not just per-kind.
             videoFramesDecoded = if (video.sawFramesDecoded) video.inboundFramesDecoded else null,

@@ -107,7 +107,7 @@ internal final class PeerConnectionSlot: PeerConnectionSlotProtocol {
 
         // Number of inbound-rtp stats seen for this kind. Distinguishes a
         // genuine 0 from "no inbound-rtp stat" so telemetry counters surface
-        // nil (unknown) rather than a fake 0 (telemetry §5.2/§5.3).
+        // nil (unknown) rather than a fake 0.
         var inboundRtpCount: Int = 0
         // Per-counter presence. A row can exist (inboundRtpCount > 0) yet omit
         // a specific member; surface nil for that member alone, not a fake 0.
@@ -974,7 +974,7 @@ private extension PeerConnectionSlot {
             videoNackPerMin: videoNackPerMin,
             videoPliPerMin: videoPliPerMin,
             videoFirPerMin: videoFirPerMin,
-            // Telemetry §5.2/§5.3: nil (unknown) when the specific counter
+            // Nil (unknown) when the specific counter
             // member was never present, never a fake 0. Per-field presence,
             // not just per-kind.
             videoFramesDecoded: video.sawFramesDecoded ? video.inboundFramesDecoded : nil,

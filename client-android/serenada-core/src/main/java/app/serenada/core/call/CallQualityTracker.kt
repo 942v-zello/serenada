@@ -6,7 +6,7 @@ import app.serenada.core.DropoutTrigger
 import kotlin.math.max
 
 /**
- * Owns the cross-platform call-quality algorithm (telemetry §5). Driven by
+ * Owns the cross-platform call-quality algorithm. Driven by
  * **explicit inputs** — never by reading session state after the fact:
  * [onStatsSample], [onConnectionStatusTransition], [onPhaseTransition],
  * [finalize]. Produces an immutable [CallQualitySummary], live during the
@@ -15,7 +15,7 @@ import kotlin.math.max
  * Sampling begins only at the first `InCall` transition — pre-call samples
  * (during joining/waiting) must not contaminate MOS or the medians. Samples
  * arriving while a dropout is open are **skipped** so the degraded shoulder
- * RTT/jitter don't skew the steady-state medians + MOS (telemetry §5.2).
+ * RTT/jitter don't skew the steady-state medians + MOS.
  *
  * Port of the web reference `CallQualityTracker.ts`; behavior locked by the
  * shared dropout/median unit tests + the MOS golden vector.
@@ -26,7 +26,7 @@ internal class CallQualityTracker(
     private var inCallStartedAtMs: Long? = null
 
     // Streaming medians keep cost O(log n) per sample instead of re-sorting
-    // the full history on every recompute (telemetry §5.2).
+    // the full history on every recompute.
     private val latency = StreamingMedian()
     private val jitter = StreamingMedian()
     private var qualitySampleCount = 0
@@ -49,7 +49,7 @@ internal class CallQualityTracker(
     /**
      * Feed a fresh stats sample. Ignored before first InCall, after finalize,
      * and while a dropout is open (the degraded-window RTT/jitter would skew
-     * the steady-state medians + MOS, telemetry §5.2).
+     * the steady-state medians + MOS).
      */
     fun onStatsSample(stats: RealtimeCallStats, nowMs: Long) {
         val startedAt = inCallStartedAtMs
@@ -97,7 +97,7 @@ internal class CallQualityTracker(
      * (e.g. the remote peer departs) closes any open dropout *silently* —
      * that forced `-> Connected` reset is a peer-departure, not a link
      * recovery, so it must not emit a phantom `reconnected` or inflate
-     * `countReconnects` (telemetry §5.1).
+     * `countReconnects`.
      */
     fun onPhaseTransition(next: CallPhase, nowMs: Long) {
         if (finalized) return

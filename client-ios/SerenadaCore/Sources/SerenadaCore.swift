@@ -7,7 +7,7 @@ public enum EndReason: Equatable, Sendable {
     case error(String)
 }
 
-/// Reason a dropout began, carried so hosts can distinguish recovery causes (telemetry §5.1).
+/// Reason a dropout began, carried so hosts can distinguish recovery causes.
 public enum DropoutTrigger: Equatable, Sendable {
     /// Dropout began with signaling/network loss.
     case networkLost
@@ -16,15 +16,15 @@ public enum DropoutTrigger: Equatable, Sendable {
 }
 
 /// Connection-quality event emitted by the SDK through
-/// ``SerenadaCoreDelegate/sessionDidEmitConnectionEvent(_:event:)`` (telemetry §5.1).
+/// ``SerenadaCoreDelegate/sessionDidEmitConnectionEvent(_:event:)``.
 public enum ConnectionEvent: Equatable, Sendable {
-    /// A dropout recovered. Maps to `redacted-analytics-event`.
+    /// A dropout recovered. Maps to the host's reconnect analytics.
     /// - Parameters:
     ///   - downtimeMs: downtime of the recovered dropout, in ms.
     ///   - reason: `networkLost` if the dropout began with signaling/network loss, else `unknown`.
     case reconnected(downtimeMs: Int64, reason: DropoutTrigger)
 
-    /// Recovery was abandoned. Maps to `redacted-analytics-event`.
+    /// Recovery was abandoned. Maps to the host's reconnect-failed analytics.
     case reconnectFailed(reason: ReconnectFailedReason)
 
     public enum ReconnectFailedReason: Equatable, Sendable {
@@ -41,7 +41,7 @@ public protocol SerenadaCoreDelegate: AnyObject {
     func sessionRequiresPermissions(_ session: SerenadaSession, permissions: [MediaCapability])
     func sessionDidChangeState(_ session: SerenadaSession, state: CallState)
     func sessionDidEnd(_ session: SerenadaSession, reason: EndReason)
-    /// Called when the SDK raises a connection-quality event (telemetry §5.1).
+    /// Called when the SDK raises a connection-quality event.
     /// Additive, default no-op — read aggregate quality via
     /// ``SerenadaSession/qualitySummary``.
     func sessionDidEmitConnectionEvent(_ session: SerenadaSession, event: ConnectionEvent)

@@ -3,7 +3,7 @@ import XCTest
 
 /// Verifies the new telemetry counters (videoFramesDecoded/Dropped,
 /// audioPacketsLost/Received) are summed across peer slots in the existing
-/// merge step (telemetry §5.2/§5.3).
+/// merge step.
 @MainActor
 final class StatsCounterMergeTests: XCTestCase {
     func testSumsNewCountersAcrossSlots() {

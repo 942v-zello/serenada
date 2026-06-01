@@ -23,11 +23,11 @@ data class RealtimeCallStats(
     val videoNackPerMin: Double? = null,
     val videoPliPerMin: Double? = null,
     val videoFirPerMin: Double? = null,
-    /** Cumulative inbound-video `framesDecoded`, summed across peer slots (telemetry §5.3). */
+    /** Cumulative inbound-video `framesDecoded`, summed across peer slots. */
     val videoFramesDecoded: Long? = null,
     /** Cumulative inbound-video `framesDropped`, summed across peer slots. */
     val videoFramesDropped: Long? = null,
-    /** Cumulative inbound-audio `packetsLost`, summed across peer slots (telemetry §5.2). */
+    /** Cumulative inbound-audio `packetsLost`, summed across peer slots. */
     val audioPacketsLost: Long? = null,
     /** Cumulative inbound-audio `packetsReceived`, summed across peer slots. */
     val audioPacketsReceived: Long? = null,

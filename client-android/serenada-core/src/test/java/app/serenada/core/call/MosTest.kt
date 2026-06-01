@@ -4,7 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * MOS golden vector — the cross-platform source of truth (telemetry §5.4).
+ * MOS golden vector — the cross-platform source of truth.
  * This table is identical to the web (`mos.test.ts`) and iOS (`MosTests`)
  * suites and must reproduce to +/-0.01. If a coefficient changes, regenerate
  * the table from the reference TS impl and update all three suites together.

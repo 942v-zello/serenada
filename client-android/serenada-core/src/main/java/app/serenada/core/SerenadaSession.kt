@@ -129,7 +129,7 @@ class SerenadaSession internal constructor(
     val diagnostics: StateFlow<CallDiagnostics> = _diagnostics.asStateFlow()
 
     /**
-     * Aggregate call-quality summary (telemetry §5). Reflects the live
+     * Aggregate call-quality summary. Reflects the live
      * tracker while in-call and the finalized snapshot after the call ends;
      * stays readable after teardown. Null before sampling begins (first
      * InCall).
@@ -250,7 +250,7 @@ class SerenadaSession internal constructor(
     private val audioCoordinatorCollectorJobs = mutableListOf<Job>()
     private var audioCoordinatorDeactivationJob: Job? = null
     private var closed = false
-    // Telemetry §5: aggregate call-quality tracker, driven by explicit
+    // Aggregate call-quality tracker, driven by explicit
     // inputs. `_qualitySummary` is snapshotted at finalize and survives
     // teardown so hosts can read it after the session stops.
     private val qualityTracker = CallQualityTracker { event ->
@@ -415,7 +415,7 @@ class SerenadaSession internal constructor(
                     realtimeStats = merged,
                 )
             )
-            // Telemetry §5: feed the quality tracker. Sampling only begins
+            // Feed the quality tracker. Sampling only begins
             // once the tracker has seen the first InCall transition, so
             // pre-call Waiting/Joining samples are ignored.
             qualityTracker.onStatsSample(merged, this.clock.monotonicMs())
@@ -1495,7 +1495,7 @@ class SerenadaSession internal constructor(
     private fun updateState(newState: CallState) {
         val previousPhase = _state.value.phase
         _state.value = newState
-        // Telemetry §5: drive the quality tracker on phase transitions.
+        // Drive the quality tracker on phase transitions.
         // Sampling/dropout tracking only begins once the tracker sees the
         // first InCall transition.
         if (newState.phase != previousPhase) {
@@ -1508,7 +1508,7 @@ class SerenadaSession internal constructor(
      * Feed a connection-status change to the quality tracker. The dropout
      * **trigger** is derived at the transition: a degradation driven by lost
      * signaling is `NETWORK_LOST`; an ICE/peer-level degradation while
-     * signaling is up is `UNKNOWN` (telemetry §5.1).
+     * signaling is up is `UNKNOWN`.
      */
     private fun feedQualityConnectionStatus(next: ConnectionStatus) {
         if (next == lastTrackedConnectionStatus) return
@@ -1801,7 +1801,7 @@ class SerenadaSession internal constructor(
     }
 
     /**
-     * Telemetry §5.1: emit `reconnectFailed` for a call that reached InCall
+     * Emit `reconnectFailed` for a call that reached InCall
      * when the local termination was driven by a concrete recovery-abandonment
      * path — classified from the original signaling **code** via the shared
      * [ReconnectReason] table (join hard-timeout / invalid-or-expired token /

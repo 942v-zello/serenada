@@ -1,5 +1,5 @@
 /**
- * Streaming median over a numeric sample stream (telemetry §5.2) — the
+ * Streaming median over a numeric sample stream — the
  * cross-platform **reference** implementation. Ported identically to
  * Android (`StreamingMedian.kt`) and iOS (`StreamingMedian.swift`).
  *

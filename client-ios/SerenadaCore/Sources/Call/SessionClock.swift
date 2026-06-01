@@ -5,7 +5,7 @@ import Foundation
 protocol SessionClock: AnyObject {
     /// Wall-clock milliseconds since epoch.
     func nowMs() -> Int64
-    /// Monotonic milliseconds for interval math (telemetry §5.1): unaffected
+    /// Monotonic milliseconds for interval math: unaffected
     /// by a wall-clock / NTP step, so a backward correction during an open
     /// dropout can't record a real outage as 0ms. Production uses
     /// `DispatchTime` (CLOCK_UPTIME / mach absolute time).

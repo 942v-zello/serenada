@@ -22,9 +22,9 @@ interface SerenadaCoreDelegate {
     fun onSessionEnded(session: SerenadaSession, reason: EndReason) {}
 
     /**
-     * Called when the SDK raises a connection-quality event (telemetry §5.1).
-     * Hosts map these to the `redacted-analytics-event` /
-     * `redacted-analytics-event` analytics events. Additive, default no-op
+     * Called when the SDK raises a connection-quality event.
+     * Hosts map these to their reconnect/disconnect analytics events.
+     * Additive, default no-op
      * — read aggregate quality via [SerenadaSession.qualitySummary].
      */
     fun onConnectionEvent(session: SerenadaSession, event: ConnectionEvent) {}
@@ -36,7 +36,7 @@ sealed class EndReason {
     data class Error(val error: CallError) : EndReason()
 }
 
-/** Reason a dropout began, carried so hosts can distinguish recovery causes (telemetry §5.1). */
+/** Reason a dropout began, carried so hosts can distinguish recovery causes. */
 enum class DropoutTrigger {
     /** Dropout began with signaling/network loss. */
     NETWORK_LOST,
@@ -47,10 +47,10 @@ enum class DropoutTrigger {
 
 /**
  * Connection-quality event emitted by the SDK through
- * [SerenadaCoreDelegate.onConnectionEvent] (telemetry §5.1).
+ * [SerenadaCoreDelegate.onConnectionEvent].
  */
 sealed class ConnectionEvent {
-    /** A dropout recovered. Maps to `redacted-analytics-event`. */
+    /** A dropout recovered. Maps to the host's reconnect analytics. */
     data class Reconnected(
         /** Downtime of the recovered dropout, in ms. */
         val downtimeMs: Long,
@@ -58,7 +58,7 @@ sealed class ConnectionEvent {
         val reason: DropoutTrigger,
     ) : ConnectionEvent()
 
-    /** Recovery was abandoned. Maps to `redacted-analytics-event`. */
+    /** Recovery was abandoned. Maps to the host's reconnect-failed analytics. */
     data class ReconnectFailed(
         val reason: ReconnectFailedReason,
     ) : ConnectionEvent()

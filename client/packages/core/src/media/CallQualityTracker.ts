@@ -10,7 +10,7 @@ import { computeMos } from './mos.js';
 import { StreamingMedian } from './streamingMedian.js';
 
 /**
- * Owns the cross-platform call-quality algorithm (telemetry §5). Driven by
+ * Owns the cross-platform call-quality algorithm. Driven by
  * **explicit inputs** — never by reading session state after the fact:
  * `onStatsSample`, `onConnectionStatusTransition`, `onPhaseTransition`,
  * `finalize`. Produces an immutable {@link CallQualitySummary}, live during
@@ -19,7 +19,7 @@ import { StreamingMedian } from './streamingMedian.js';
  * Sampling begins only at the first `inCall` transition — pre-call samples
  * (during joining/waiting) must not contaminate MOS or the medians. Samples
  * arriving while a dropout is open are **skipped** so the degraded shoulder
- * RTT/jitter don't skew the steady-state medians + MOS (telemetry §5.2).
+ * RTT/jitter don't skew the steady-state medians + MOS.
  *
  * Interval math (dropout downtime) uses a **monotonic** `now` fed by the
  * session, so a wall-clock step doesn't record a real outage as 0ms.
@@ -32,7 +32,7 @@ export class CallQualityTracker {
 
     // Point-in-time gauges accumulated across the in-call window. Streaming
     // medians keep cost O(log n) per sample instead of re-sorting the full
-    // history on every recompute (telemetry §5.2).
+    // history on every recompute.
     private readonly latency = new StreamingMedian();
     private readonly jitter = new StreamingMedian();
     private qualitySampleCount = 0;
@@ -70,7 +70,7 @@ export class CallQualityTracker {
         if (this.finalized || this.inCallStartedAtMs === null) return;
         if (now < this.inCallStartedAtMs) return;
         // Skip samples while a dropout is open — degraded-shoulder RTT/jitter
-        // must not pull the steady-state medians + MOS (telemetry §5.2).
+        // must not pull the steady-state medians + MOS.
         if (this.dropoutOpenSinceMs !== null) return;
 
         let usable = false;
@@ -119,7 +119,7 @@ export class CallQualityTracker {
      * into `inCall`. Leaving `inCall` (e.g. the remote peer departs) closes
      * any open dropout *silently* — that forced `→ connected` reset is a
      * peer-departure, not a link recovery, so it must not emit a phantom
-     * `reconnected` or inflate `countReconnects` (telemetry §5.1).
+     * `reconnected` or inflate `countReconnects`.
      */
     onPhaseTransition(next: CallPhase, now: number): void {
         if (this.finalized) return;

@@ -1,7 +1,7 @@
 @testable import SerenadaCore
 import XCTest
 
-/// Reconnect-reason table (telemetry §5.1). Identical mapping to the web
+/// Reconnect-reason table. Identical mapping to the web
 /// (`reconnectReason.test.ts`) and Android (`ReconnectReasonTest.kt`) suites;
 /// parity across the three tables is also guarded by
 /// `check-telemetry-parity.mjs`.

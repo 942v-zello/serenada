@@ -4,7 +4,7 @@
  * Verifies that the telemetry **MOS coefficients** and the **reconnect-reason
  * table** are identical across all three Serenada cores (web, Android, iOS).
  *
- * These two artifacts feed shared analytics columns (overview §4) but can't be
+ * These two artifacts feed shared analytics columns but can't be
  * guarded by `check-resilience-constants.mjs` (that script only parses numeric
  * resilience constants). A single-file typo in a MOS coefficient, or a
  * platform that classifies a reconnect-failure code differently, drifts the
@@ -43,8 +43,8 @@ function fail(msg) {
 // identical. This catches a single-character coefficient typo on any port.
 
 function extractNumbers(src) {
-    // Drop line comments + block-comment lines so doc numbers (e.g. §5.4)
-    // don't pollute the coefficient list.
+    // Drop line comments + block-comment lines so numbers that appear in
+    // doc prose don't pollute the coefficient list.
     const code = src
         .replace(/\/\*[\s\S]*?\*\//g, '')
         .split('\n')

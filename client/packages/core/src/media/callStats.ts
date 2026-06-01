@@ -24,11 +24,11 @@ interface MediaTotals {
     remoteInboundPacketsLost: number;
     // Number of inbound-rtp stats observed for this kind. Used to distinguish
     // "counter genuinely 0" from "no inbound-rtp stat at all" so the telemetry
-    // counters surface `null` (unknown) rather than a fake 0 (telemetry §5.2/§5.3).
+    // counters surface `null` (unknown) rather than a fake 0.
     inboundRtpCount: number;
     // Per-counter presence. A row can exist (inboundRtpCount > 0) yet omit a
     // specific member (e.g. an older impl with no `framesDropped`); surface
-    // `null` for that member alone rather than a fake 0 (telemetry §5.2/§5.3).
+    // `null` for that member alone rather than a fake 0.
     sawPacketsReceived: boolean;
     sawPacketsLost: boolean;
     sawFramesDecoded: boolean;
@@ -264,7 +264,7 @@ export class CallStatsCollector {
                 audioRxKbps, audioTxKbps,
                 videoRxPacketLossPct, videoTxPacketLossPct, videoRxKbps, videoTxKbps,
                 videoFps, videoResolution, videoFreezeCount60s, videoFreezeDuration60s, videoRetransmitPct,
-                // Telemetry §5.2/§5.3: surface `null` (unknown) when the
+                // Surface `null` (unknown) when the
                 // specific counter member was never present, never a fake 0 —
                 // a fake 0 would make the tracker compute packetLossPct=0 / MOS,
                 // and host frames-dropped pct would read as a clean 0% instead

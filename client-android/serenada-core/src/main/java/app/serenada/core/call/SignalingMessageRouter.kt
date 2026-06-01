@@ -26,9 +26,9 @@ internal class SignalingMessageRouter(
     // Mutation callbacks
     private val onJoined: (clientId: String, hostCid: String?, roomState: RoomState?, turnToken: String?, turnTTL: Long?, reconnectToken: String?, reconnectTokenTTL: Long?) -> Unit,
     private val onRoomStateUpdated: (RoomState) -> Unit,
-    // `serverCode` is the original signaling error code (telemetry §5.1:
-    // preserved so the shared reconnect-reason table classifies the failure
-    // by its concrete code, not the coarse mapped `CallError` type).
+    // `serverCode` is the original signaling error code, preserved so the
+    // shared reconnect-reason table classifies the failure by its concrete
+    // code, not the coarse mapped `CallError` type.
     private val onError: (callError: CallError, serverCode: String?) -> Unit,
     private val onRoomEnded: () -> Unit,
     private val onContentStateReceived: (fromCid: String, active: Boolean, contentType: String?) -> Unit,

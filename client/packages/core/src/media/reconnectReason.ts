@@ -1,6 +1,6 @@
 /**
- * Reconnect-reason mapping — the cross-platform **reference** table
- * (telemetry §5.1). The Android (`ReconnectReason.kt`) and iOS
+ * Reconnect-reason mapping — the cross-platform **reference** table.
+ * The Android (`ReconnectReason.kt`) and iOS
  * (`ReconnectReason.swift`) ports must reproduce this mapping exactly so the
  * single shared `reconnectFailed.reason` / `reconnected.disconnection_reason`
  * analytics columns can't silently diverge per platform.

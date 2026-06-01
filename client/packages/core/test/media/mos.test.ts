@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { computeMos } from '../../src/media/mos.js';
 
 /**
- * MOS golden vector — the cross-platform source of truth (telemetry §5.4).
+ * MOS golden vector — the cross-platform source of truth.
  * Android (`MosTest.kt`) and iOS (`MosTests.swift`) assert the SAME table to
  * ±0.01. If any coefficient in `mos.ts` changes, regenerate this table from
  * the reference impl and update all three suites in lockstep.

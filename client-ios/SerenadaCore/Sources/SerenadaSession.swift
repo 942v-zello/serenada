@@ -123,12 +123,12 @@ public final class SerenadaSession: ObservableObject {
     /// Real-time connection diagnostics.
     @Published public private(set) var diagnostics = CallDiagnostics()
 
-    /// Aggregate call-quality summary (telemetry §5). Reflects the live
+    /// Aggregate call-quality summary. Reflects the live
     /// tracker while in-call and the finalized snapshot after the call ends;
     /// stays readable after teardown. Nil before sampling begins (first
     /// inCall).
     ///
-    /// `@Published` (SDK plan 01:79): backed by a stored snapshot refreshed on
+    /// `@Published`: backed by a stored snapshot refreshed on
     /// each tracker recompute so a SwiftUI host bound to `qualitySummary` for a
     /// live MOS/loss readout gets `objectWillChange` mid-call.
     @Published public private(set) var qualitySummary: CallQualitySummary?
@@ -201,7 +201,7 @@ public final class SerenadaSession: ObservableObject {
     private var statsPoller: StatsPoller?
     private var audioLevelPoller: AudioLevelPoller?
 
-    // Telemetry §5: aggregate call-quality tracker, driven by explicit
+    // Aggregate call-quality tracker, driven by explicit
     // inputs. `finalizedQualitySummary` is snapshotted at finalize and
     // survives teardown so hosts can read it after the session stops.
     private lazy var qualityTracker = CallQualityTracker { [weak self] event in
@@ -1395,14 +1395,14 @@ public final class SerenadaSession: ObservableObject {
         qualitySummary = finalizedQualitySummary
     }
 
-    /// Telemetry §5.1: emit `reconnectFailed` for a call that reached inCall
+    /// Emit `reconnectFailed` for a call that reached inCall
     /// when the local termination was driven by a recovery-abandonment error
     /// (transport exhaustion / invalid token / server error). Never for user
     /// hangup or remote-ended. No-op once the tracker is finalized.
     private func maybeReportReconnectFailed(serverCode: String?) {
         guard qualityTracker.hasStartedSampling() else { return }
         // Classify from the original signaling **code** via the shared
-        // ReconnectReason table (telemetry §5.1): join hard-timeout /
+        // ReconnectReason table: join hard-timeout /
         // invalid-or-expired token / connection-failed / transport-exhaustion
         // only. Arbitrary server errors (BAD_REQUEST, etc.) map to nil and emit
         // nothing. Never for user hangup or remote-ended.
@@ -1788,10 +1788,10 @@ public final class SerenadaSession: ObservableObject {
         delegateProvider?()?.sessionDidChangeState(self, state: state)
     }
 
-    /// Telemetry §5: drive the quality tracker on phase + connection-status
+    /// Drive the quality tracker on phase + connection-status
     /// transitions. The dropout **trigger** is derived at the transition: a
     /// degradation driven by lost signaling is `.networkLost`; an ICE/peer-
-    /// level degradation while signaling is up is `.unknown` (§5.1).
+    /// level degradation while signaling is up is `.unknown`.
     private func feedQualityTracker(phase: CallPhase, connectionStatus: SerenadaConnectionStatus) {
         // Use the injected clock's monotonic source so dropout interval math is
         // deterministic/testable and unaffected by a wall-clock step (#7/#12).
@@ -1813,9 +1813,8 @@ public final class SerenadaSession: ObservableObject {
         if changed { refreshQualitySummary() }
     }
 
-    /// Refresh the published `qualitySummary` from the tracker (telemetry §5,
-    /// SDK plan 01:79). Once finalized, the snapshot is frozen and survives
-    /// teardown.
+    /// Refresh the published `qualitySummary` from the tracker. Once
+    /// finalized, the snapshot is frozen and survives teardown.
     private func refreshQualitySummary() {
         if finalizedQualitySummary == nil {
             qualitySummary = qualityTracker.summarize()
@@ -1879,7 +1878,7 @@ public final class SerenadaSession: ObservableObject {
             isSignalingConnected: { [weak self] in self?.diagnostics.isSignalingConnected ?? false },
             onJoinTimeout: { [weak self] in
                 guard let self else { return }
-                // Telemetry §5.1: join hard-timeout is a concrete recovery-
+                // Join hard-timeout is a concrete recovery-
                 // abandonment terminal path -> reconnectFailed(timeout).
                 if self.qualityTracker.hasStartedSampling() {
                     self.qualityTracker.reportReconnectFailed(.timeout)
@@ -1918,7 +1917,7 @@ public final class SerenadaSession: ObservableObject {
             onStatsUpdated: { [weak self] merged in
                 guard let self else { return }
                 self.commitSnapshot { _, d in d.realtimeStats = merged }
-                // Telemetry §5: feed the quality tracker via the injected
+                // Feed the quality tracker via the injected
                 // clock's monotonic source (#7/#12). Sampling only begins once
                 // the tracker has seen the first inCall transition, so pre-call
                 // waiting/joining samples are ignored.

@@ -1,21 +1,21 @@
 import Foundation
 
 /// Immutable snapshot of aggregate call quality, computed by the SDK and
-/// consumed by hosts to populate `redacted-analytics-event` analytics (telemetry §5).
+/// consumed by hosts to populate their call-ended analytics.
 /// Updated live during the call and finalized at call end; remains readable
 /// after the session stops.
 ///
 /// `mosScore`/`packetLossPct`/`medianLatencyMs`/`medianJitterMs` follow the
 /// exact null policy + counter-delta loss rules in the cross-platform
-/// contract (overview §5.2/§5.4): packet loss is computed from raw
+/// contract: packet loss is computed from raw
 /// `audioPacketsLost`/`audioPacketsReceived` deltas, never by medianing the
 /// cumulative loss percentage.
 public struct CallQualitySummary: Equatable, Sendable {
-    /// MOS estimate (§5.4). Nil unless all three of latency/jitter/loss are defined.
+    /// MOS estimate. Nil unless all three of latency/jitter/loss are defined.
     public var mosScore: Double?
-    /// Call-level audio rx packet loss percentage, from counter deltas (§5.2).
+    /// Call-level audio rx packet loss percentage, from counter deltas.
     public var packetLossPct: Double?
-    /// Median of sampled rttMs (§5.2 median definition), or nil.
+    /// Median of sampled rttMs, or nil.
     public var medianLatencyMs: Int?
     /// Median of sampled audioJitterMs, or nil.
     public var medianJitterMs: Int?

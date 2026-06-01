@@ -16,9 +16,9 @@ final class SignalingMessageRouter {
     private let onSignalingPayload: (_ message: SignalingMessage) -> Void
     private let onContentState: (_ payload: ContentStatePayload) -> Void
     private let onParticipantMediaState: (_ payload: MediaStatePayload) -> Void
-    // `serverCode` is the original signaling error code (telemetry §5.1:
-    // preserved so the shared reconnect-reason table classifies the failure
-    // by its concrete code, not the coarse mapped `CallError` case).
+    // `serverCode` is the original signaling error code, preserved so the
+    // shared reconnect-reason table classifies the failure by its concrete
+    // code, not the coarse mapped `CallError` case.
     private let onError: (_ error: CallError, _ serverCode: String?) -> Void
     private let sendMessage: (_ type: String, _ payload: JSONValue?, _ to: String?) -> Void
 

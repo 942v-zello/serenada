@@ -7,7 +7,7 @@ import org.junit.Test
 /**
  * Verifies the new telemetry counters (videoFramesDecoded/Dropped,
  * audioPacketsLost/Received) are summed across peer slots in the existing
- * merge step (telemetry §5.2/§5.3).
+ * merge step.
  */
 class StatsCounterMergeTest {
     @Test

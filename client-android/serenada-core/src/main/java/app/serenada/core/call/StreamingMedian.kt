@@ -4,7 +4,7 @@ import java.util.PriorityQueue
 import kotlin.math.roundToInt
 
 /**
- * Streaming median over a numeric sample stream (telemetry §5.2) — a direct
+ * Streaming median over a numeric sample stream — a direct
  * port of the cross-platform **reference** implementation
  * (`client/packages/core/src/media/streamingMedian.ts`).
  *

@@ -250,7 +250,7 @@ export interface SerenadaSessionHandle {
     readonly remoteStreams: Map<string, MediaStream>;
     readonly callStats: CallStats | null;
     /**
-     * Aggregate call-quality summary (telemetry §5). Updated live during the
+     * Aggregate call-quality summary. Updated live during the
      * call and finalized at end; readable after the session stops. `null`
      * before sampling begins (first `inCall`).
      */
@@ -287,16 +287,16 @@ export interface CallStats {
     videoRetransmitPct: number | null;
     /**
      * Cumulative inbound-video `framesDecoded`, summed across peer slots.
-     * Surfaced so hosts can diff per video segment for
-     * `redacted-analytics-event.frames_dropped_pct` (telemetry §5.3).
+     * Surfaced so hosts can diff per video segment to feed their
+     * per-video-segment frame-drop analytics.
      */
     videoFramesDecoded: number | null;
     /** Cumulative inbound-video `framesDropped`, summed across peer slots. */
     videoFramesDropped: number | null;
     /**
      * Cumulative inbound-audio `packetsLost`, summed across peer slots.
-     * Feeds the call-level delta-based packet-loss computation (telemetry
-     * §5.2) — do not median the cumulative loss percentage.
+     * Feeds the call-level delta-based packet-loss computation — do not
+     * median the cumulative loss percentage.
      */
     audioPacketsLost: number | null;
     /** Cumulative inbound-audio `packetsReceived`, summed across peer slots. */
@@ -306,13 +306,13 @@ export interface CallStats {
 
 /**
  * Immutable snapshot of aggregate call quality, computed by the SDK and
- * consumed by hosts to populate `redacted-analytics-event` analytics (telemetry §5).
+ * consumed by hosts to populate their call-ended analytics.
  * Updated live during the call and finalized at call end; remains readable
  * after the session stops.
  */
 export interface CallQualitySummary {
     /**
-     * MOS estimate (telemetry §5.4 heuristic). `null` unless all of
+     * MOS estimate (heuristic). `null` unless all of
      * `medianLatencyMs`, `medianJitterMs`, and `packetLossPct` are defined.
      */
     mosScore: number | null;
@@ -322,7 +322,7 @@ export interface CallQualitySummary {
      * `null` until at least one usable audio-loss sample is seen.
      */
     packetLossPct: number | null;
-    /** Median of sampled `rttMs` (telemetry §5.2 median definition), or `null`. */
+    /** Median of sampled `rttMs`, or `null`. */
     medianLatencyMs: number | null;
     /** Median of sampled `audioJitterMs`, or `null`. */
     medianJitterMs: number | null;
@@ -346,9 +346,8 @@ export type DropoutTrigger = 'networkLost' | 'unknown';
 
 /**
  * Connection-quality event emitted by the SDK through {@link
- * SerenadaSessionHandle.onConnectionEvent}. Hosts map these to the
- * `redacted-analytics-event` / `redacted-analytics-event` analytics events
- * (telemetry §5.1).
+ * SerenadaSessionHandle.onConnectionEvent}. Hosts map these to their
+ * reconnect/disconnect analytics events.
  */
 export type ConnectionEvent =
     | {

@@ -17,7 +17,7 @@ import org.robolectric.shadows.ShadowLooper
 import java.util.concurrent.TimeUnit
 
 /**
- * Session-level telemetry integration test (telemetry §8) — exercises the
+ * Session-level telemetry integration test — exercises the
  * hand-ported wiring (CallQualityTracker feed from phase + connection-status
  * transitions, ConnectionEvent dispatch, finalize-before-teardown ordering)
  * end-to-end through the real `SerenadaSession`, not the tracker in isolation.

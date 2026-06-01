@@ -23,11 +23,11 @@ public struct RealtimeCallStats: Equatable {
     public var videoNackPerMin: Double?
     public var videoPliPerMin: Double?
     public var videoFirPerMin: Double?
-    /// Cumulative inbound-video `framesDecoded`, summed across peer slots (telemetry §5.3).
+    /// Cumulative inbound-video `framesDecoded`, summed across peer slots.
     public var videoFramesDecoded: Int64?
     /// Cumulative inbound-video `framesDropped`, summed across peer slots.
     public var videoFramesDropped: Int64?
-    /// Cumulative inbound-audio `packetsLost`, summed across peer slots (telemetry §5.2).
+    /// Cumulative inbound-audio `packetsLost`, summed across peer slots.
     public var audioPacketsLost: Int64?
     /// Cumulative inbound-audio `packetsReceived`, summed across peer slots.
     public var audioPacketsReceived: Int64?

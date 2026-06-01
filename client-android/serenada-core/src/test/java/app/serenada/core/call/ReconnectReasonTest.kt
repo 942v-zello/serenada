@@ -6,7 +6,7 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 /**
- * Reconnect-reason table (telemetry §5.1). Identical mapping to the web
+ * Reconnect-reason table. Identical mapping to the web
  * (`reconnectReason.test.ts`) and iOS (`ReconnectReasonTests`) suites; parity
  * across the three tables is also guarded by `check-telemetry-parity.mjs`.
  */

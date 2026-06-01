@@ -91,7 +91,7 @@ function mapErrorCode(serverCode: string): CallErrorCode {
 }
 
 /**
- * Monotonic millisecond clock for telemetry interval math (telemetry §5.1):
+ * Monotonic millisecond clock for telemetry interval math:
  * a backward wall-clock step must not record a real dropout as 0ms. Prefers
  * `performance.now()`; falls back to `Date.now()` only where unavailable.
  */
@@ -257,7 +257,7 @@ export class SerenadaSession implements SerenadaSessionHandle {
     private readonly connectionEventListeners = new Set<(event: ConnectionEvent) => void>();
     private readonly providerUnsubscribers: Array<() => void> = [];
 
-    // Telemetry §5: aggregate call-quality tracker, driven by explicit
+    // Aggregate call-quality tracker, driven by explicit
     // inputs. `_qualitySummary` is snapshotted at finalize and survives
     // teardown so hosts can read it after the session stops.
     private readonly qualityTracker: CallQualityTracker;
@@ -395,7 +395,7 @@ export class SerenadaSession implements SerenadaSessionHandle {
     /** Current WebRTC call statistics, or `null` if not yet collecting. */
     get callStats(): CallStats | null { return this.statsCollector.stats; }
     /**
-     * Aggregate call-quality summary (telemetry §5). Reflects the live
+     * Aggregate call-quality summary. Reflects the live
      * tracker while in-call and the finalized snapshot after the call ends;
      * stays readable after teardown.
      */
@@ -1020,7 +1020,7 @@ export class SerenadaSession implements SerenadaSessionHandle {
     private failWithError(event: SignalingErrorEvent): void {
         this.terminated = true;
         this.error = event;
-        // Telemetry §5.1: emit reconnectFailed only on concrete terminal
+        // Emit reconnectFailed only on concrete terminal
         // recovery-abandonment paths, and only for a call that actually
         // reached `inCall` (the host's reliability events key off a
         // connected call). Never for user hangup / remote-ended.
@@ -1160,7 +1160,7 @@ export class SerenadaSession implements SerenadaSessionHandle {
         const errorPayload = this.error ? { code: mapErrorCode(this.error.code), message: this.error.message } : null;
         const connectionStatus = this.media.connectionStatus as ConnectionStatus;
 
-        // Telemetry §5: drive the quality tracker from the freshly computed
+        // Drive the quality tracker from the freshly computed
         // phase and connection status. Sampling/dropout tracking only begins
         // once the tracker sees the first `inCall` transition.
         this.feedQualityTracker(previousPhase, phase, connectionStatus);
