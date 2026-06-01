@@ -4,6 +4,14 @@ All notable changes to the Serenada SDK are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.8.1] — 2026-06-01
+
+### Changed
+- Internal documentation cleanup only. SDK source comments and the
+  changelog were reworded to describe behavior generically. No code,
+  public API, or behavior change versus 0.8.0; consumers on 0.8.0 do
+  not need to upgrade for functional reasons.
+
 ## [0.8.0] — 2026-05-31
 
 ### Added
