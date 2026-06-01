@@ -80,6 +80,7 @@ internal class StatsPoller(
         fun mergeRealtimeStats(stats: List<RealtimeCallStats>): RealtimeCallStats? {
             if (stats.isEmpty()) return null
             fun sumN(sel: (RealtimeCallStats) -> Double?) = stats.mapNotNull(sel).sum().takeIf { stats.any { s -> sel(s) != null } }
+            fun sumL(sel: (RealtimeCallStats) -> Long?) = stats.mapNotNull(sel).sum().takeIf { stats.any { s -> sel(s) != null } }
             fun maxN(sel: (RealtimeCallStats) -> Double?) = stats.mapNotNull(sel).maxOrNull()
             fun minN(sel: (RealtimeCallStats) -> Double?) = stats.mapNotNull(sel).minOrNull()
             return RealtimeCallStats(
@@ -96,6 +97,17 @@ internal class StatsPoller(
                 videoFreezeDuration60s = sumN { it.videoFreezeDuration60s },
                 videoRetransmitPct = maxN { it.videoRetransmitPct }, videoNackPerMin = sumN { it.videoNackPerMin },
                 videoPliPerMin = sumN { it.videoPliPerMin }, videoFirPerMin = sumN { it.videoFirPerMin },
+                // Telemetry §5.2/§5.3: sum cumulative counters across slots
+                // (null when no slot reported the kind). CallQualityTracker /
+                // the host segment diff rebaseline when the *aggregate* delta
+                // goes negative (counter reset / slot teardown). In the
+                // dominant 1:1 case there is a single slot so this is exact;
+                // for mesh, a simultaneous reset of one slot masked by another
+                // slot's increase is an accepted approximation.
+                videoFramesDecoded = sumL { it.videoFramesDecoded },
+                videoFramesDropped = sumL { it.videoFramesDropped },
+                audioPacketsLost = sumL { it.audioPacketsLost },
+                audioPacketsReceived = sumL { it.audioPacketsReceived },
                 updatedAtMs = stats.maxOf { it.updatedAtMs },
             )
         }

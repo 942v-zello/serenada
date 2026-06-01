@@ -1,11 +1,14 @@
 import type {
     ActiveTransport,
     CallErrorCode,
+    CallQualitySummary,
     CallState,
     CallStats,
     CameraMode,
     ConfigurableCameraMode,
+    ConnectionEvent,
     ConnectionStatus,
+    DropoutTrigger,
     MediaCapability,
     SerenadaConfig,
     SerenadaSessionHandle,
@@ -13,6 +16,8 @@ import type {
     SnapshotResult,
     SnapshotSource,
 } from './types.js';
+import { CallQualityTracker } from './media/CallQualityTracker.js';
+import { reconnectFailedReasonForCode } from './media/reconnectReason.js';
 import {
     captureFrameFromStream,
     resolveSnapshotStream,
@@ -83,6 +88,16 @@ function mapErrorCode(serverCode: string): CallErrorCode {
         default:
             return 'unknown';
     }
+}
+
+/**
+ * Monotonic millisecond clock for telemetry interval math (telemetry §5.1):
+ * a backward wall-clock step must not record a real dropout as 0ms. Prefers
+ * `performance.now()`; falls back to `Date.now()` only where unavailable.
+ */
+function nowMonotonicMs(): number {
+    const perf = (globalThis as { performance?: { now?: () => number } }).performance;
+    return typeof perf?.now === 'function' ? perf.now() : Date.now();
 }
 
 function toRoomParticipant(participant: SignalingProviderParticipant): RoomParticipant {
@@ -239,7 +254,15 @@ export class SerenadaSession implements SerenadaSessionHandle {
     private _state: CallState;
     private stateListeners: Array<(state: CallState) => void> = [];
     private readonly peerMessageListeners = new Set<(message: PeerMessage) => void>();
+    private readonly connectionEventListeners = new Set<(event: ConnectionEvent) => void>();
     private readonly providerUnsubscribers: Array<() => void> = [];
+
+    // Telemetry §5: aggregate call-quality tracker, driven by explicit
+    // inputs. `_qualitySummary` is snapshotted at finalize and survives
+    // teardown so hosts can read it after the session stops.
+    private readonly qualityTracker: CallQualityTracker;
+    private _qualitySummary: CallQualitySummary | null = null;
+    private lastConnectionStatus: ConnectionStatus = 'connected';
 
     private _destroyed = false;
     private permissionCheckDone = false;
@@ -340,6 +363,7 @@ export class SerenadaSession implements SerenadaSessionHandle {
             },
         );
         this.statsCollector = deps.statsCollector ?? new CallStatsCollector(config.logger);
+        this.qualityTracker = new CallQualityTracker((event) => this.dispatchConnectionEvent(event));
 
         this.bindProviderEvents();
         this.media.setOnChange(() => {
@@ -370,6 +394,14 @@ export class SerenadaSession implements SerenadaSessionHandle {
     get remoteStreams(): Map<string, MediaStream> { return this.media.remoteStreams; }
     /** Current WebRTC call statistics, or `null` if not yet collecting. */
     get callStats(): CallStats | null { return this.statsCollector.stats; }
+    /**
+     * Aggregate call-quality summary (telemetry §5). Reflects the live
+     * tracker while in-call and the finalized snapshot after the call ends;
+     * stays readable after teardown.
+     */
+    get callQualitySummary(): CallQualitySummary | null {
+        return this._qualitySummary ?? this.qualityTracker.summarize();
+    }
     get hasMultipleCameras(): boolean { return this.media.hasMultipleCameras; }
     get canScreenShare(): boolean { return this.media.canScreenShare; }
     get isSignalingConnected(): boolean { return this.isConnected; }
@@ -390,6 +422,23 @@ export class SerenadaSession implements SerenadaSessionHandle {
         return () => {
             this.peerMessageListeners.delete(callback);
         };
+    }
+
+    onConnectionEvent(callback: (event: ConnectionEvent) => void): () => void {
+        this.connectionEventListeners.add(callback);
+        return () => {
+            this.connectionEventListeners.delete(callback);
+        };
+    }
+
+    private dispatchConnectionEvent(event: ConnectionEvent): void {
+        for (const listener of this.connectionEventListeners) {
+            try {
+                listener(event);
+            } catch (error) {
+                this.config.logger?.log('error', 'Session', `onConnectionEvent listener failed for ${event.kind}: ${formatError(error)}`);
+            }
+        }
     }
 
     /** Resume joining after media permissions have been granted. */
@@ -416,6 +465,7 @@ export class SerenadaSession implements SerenadaSessionHandle {
     /** Leave the call gracefully. The other participant stays connected. */
     leave(): void {
         if (this.isInactive) return;
+        this.finalizeQuality();
         this.clearReconnectTimer();
         this.invalidateIceFetches();
         this.pendingJoinOptions = null;
@@ -516,6 +566,10 @@ export class SerenadaSession implements SerenadaSessionHandle {
     destroy(): void {
         if (this._destroyed) return;
         this._destroyed = true;
+        // Snapshot the quality summary before stats/media teardown so a host
+        // that tears down via `destroy()` directly (React UI cleanup) still
+        // reads a finalized summary — including an open dropout at teardown.
+        this.finalizeQuality();
         this.invalidateIceFetches();
         this.clearReconnectTimer();
         this.clearEndingTimer();
@@ -885,6 +939,17 @@ export class SerenadaSession implements SerenadaSessionHandle {
         }
     }
 
+    /**
+     * Finalize the quality summary and snapshot it so it survives teardown.
+     * Must run BEFORE `resetSessionResources()`/`statsCollector.stop()`.
+     * Idempotent — the first call wins.
+     */
+    private finalizeQuality(): void {
+        if (this._qualitySummary !== null) return;
+        this.qualityTracker.finalize(nowMonotonicMs());
+        this._qualitySummary = this.qualityTracker.summarize();
+    }
+
     private resetSessionResources(): void {
         this.clearReconnectTimer();
         this.clearJoinTimeout();
@@ -940,6 +1005,7 @@ export class SerenadaSession implements SerenadaSessionHandle {
     private cleanupCall(): void {
         this.terminated = true;
         this.error = null;
+        this.finalizeQuality();
         this.resetSessionResources();
         this.commitTerminalState('ending');
         this.endingTimer = window.setTimeout(() => {
@@ -954,6 +1020,17 @@ export class SerenadaSession implements SerenadaSessionHandle {
     private failWithError(event: SignalingErrorEvent): void {
         this.terminated = true;
         this.error = event;
+        // Telemetry §5.1: emit reconnectFailed only on concrete terminal
+        // recovery-abandonment paths, and only for a call that actually
+        // reached `inCall` (the host's reliability events key off a
+        // connected call). Never for user hangup / remote-ended.
+        if (this.qualityTracker.hasStartedSampling()) {
+            const reconnectFailedReason = reconnectFailedReasonForCode(event.code);
+            if (reconnectFailedReason !== null) {
+                this.qualityTracker.reportReconnectFailed(reconnectFailedReason);
+            }
+        }
+        this.finalizeQuality();
         this.resetSessionResources();
         this.commitTerminalState('error', {
             code: mapErrorCode(event.code),
@@ -1016,6 +1093,7 @@ export class SerenadaSession implements SerenadaSessionHandle {
         const signalingState = this.roomState;
         const clientId = this.clientId;
 
+        const previousPhase = this._state.phase;
         let phase = this._state.phase;
 
         if (this.error) {
@@ -1080,6 +1158,17 @@ export class SerenadaSession implements SerenadaSessionHandle {
             });
 
         const errorPayload = this.error ? { code: mapErrorCode(this.error.code), message: this.error.message } : null;
+        const connectionStatus = this.media.connectionStatus as ConnectionStatus;
+
+        // Telemetry §5: drive the quality tracker from the freshly computed
+        // phase and connection status. Sampling/dropout tracking only begins
+        // once the tracker sees the first `inCall` transition.
+        this.feedQualityTracker(previousPhase, phase, connectionStatus);
+        // `feedQualityTracker` can synchronously emit a `reconnected` event to
+        // a host `onConnectionEvent` handler that calls `leave()`/`destroy()`.
+        // Re-check before assigning `_state` / notifying so we don't deliver a
+        // post-teardown state or re-run teardown side effects.
+        if (this.isInactive) return;
 
         this._state = {
             phase,
@@ -1087,7 +1176,7 @@ export class SerenadaSession implements SerenadaSessionHandle {
             roomUrl: this.roomUrl,
             localParticipant,
             remoteParticipants,
-            connectionStatus: this.media.connectionStatus as ConnectionStatus,
+            connectionStatus,
             signalingState: this.computeSignalingState(errorPayload),
             activeTransport: this.activeTransport,
             requiredPermissions: this._state.requiredPermissions,
@@ -1095,6 +1184,32 @@ export class SerenadaSession implements SerenadaSessionHandle {
         };
 
         this.notifyListeners();
+    }
+
+    /**
+     * Feed phase + connection-status transitions to the quality tracker.
+     * The dropout **trigger** is derived at the transition: a degradation
+     * driven by lost signaling is `networkLost`; an ICE/peer-level
+     * degradation while signaling is up is `unknown`.
+     */
+    private feedQualityTracker(
+        previousPhase: CallState['phase'],
+        nextPhase: CallState['phase'],
+        nextStatus: ConnectionStatus,
+    ): void {
+        const now = nowMonotonicMs();
+        if (nextPhase !== previousPhase) {
+            this.qualityTracker.onPhaseTransition(nextPhase, now);
+        }
+        if (nextStatus !== this.lastConnectionStatus) {
+            const trigger: DropoutTrigger = !this.isConnected ? 'networkLost' : 'unknown';
+            this.qualityTracker.onConnectionStatusTransition(
+                nextStatus,
+                trigger,
+                now,
+            );
+            this.lastConnectionStatus = nextStatus;
+        }
     }
 
     /**
@@ -1297,7 +1412,13 @@ export class SerenadaSession implements SerenadaSessionHandle {
         if (this.statsCollector.stats !== null) return;
         this.statsCollector.start(
             () => this.media.getPeerConnections(),
-            () => this.notifyListeners(),
+            () => {
+                const stats = this.statsCollector.stats;
+                if (stats !== null) {
+                    this.qualityTracker.onStatsSample(stats, nowMonotonicMs());
+                }
+                this.notifyListeners();
+            },
         );
     }
 

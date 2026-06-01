@@ -7,18 +7,51 @@ public enum EndReason: Equatable, Sendable {
     case error(String)
 }
 
+/// Reason a dropout began, carried so hosts can distinguish recovery causes (telemetry §5.1).
+public enum DropoutTrigger: Equatable, Sendable {
+    /// Dropout began with signaling/network loss.
+    case networkLost
+    /// Dropout cause could not be attributed to network loss (e.g. ICE/peer-level).
+    case unknown
+}
+
+/// Connection-quality event emitted by the SDK through
+/// ``SerenadaCoreDelegate/sessionDidEmitConnectionEvent(_:event:)`` (telemetry §5.1).
+public enum ConnectionEvent: Equatable, Sendable {
+    /// A dropout recovered. Maps to `redacted-analytics-event`.
+    /// - Parameters:
+    ///   - downtimeMs: downtime of the recovered dropout, in ms.
+    ///   - reason: `networkLost` if the dropout began with signaling/network loss, else `unknown`.
+    case reconnected(downtimeMs: Int64, reason: DropoutTrigger)
+
+    /// Recovery was abandoned. Maps to `redacted-analytics-event`.
+    case reconnectFailed(reason: ReconnectFailedReason)
+
+    public enum ReconnectFailedReason: Equatable, Sendable {
+        /// Recovery window elapsed.
+        case timeout
+        /// No network / transport available.
+        case networkConnectivity
+    }
+}
+
 /// Delegate for session lifecycle events (state changes, permissions, call end).
 @MainActor
 public protocol SerenadaCoreDelegate: AnyObject {
     func sessionRequiresPermissions(_ session: SerenadaSession, permissions: [MediaCapability])
     func sessionDidChangeState(_ session: SerenadaSession, state: CallState)
     func sessionDidEnd(_ session: SerenadaSession, reason: EndReason)
+    /// Called when the SDK raises a connection-quality event (telemetry §5.1).
+    /// Additive, default no-op — read aggregate quality via
+    /// ``SerenadaSession/qualitySummary``.
+    func sessionDidEmitConnectionEvent(_ session: SerenadaSession, event: ConnectionEvent)
 }
 
 public extension SerenadaCoreDelegate {
     func sessionRequiresPermissions(_ session: SerenadaSession, permissions: [MediaCapability]) {}
     func sessionDidChangeState(_ session: SerenadaSession, state: CallState) {}
     func sessionDidEnd(_ session: SerenadaSession, reason: EndReason) {}
+    func sessionDidEmitConnectionEvent(_ session: SerenadaSession, event: ConnectionEvent) {}
 }
 
 /// Result of creating a new room. Call `join` to start the call.
@@ -39,7 +72,7 @@ public struct CreateRoomResult {
 @MainActor
 public final class SerenadaCore {
     /// SDK version string.
-    public static let version = "0.7.1"
+    public static let version = "0.8.0"
 
     /// SDK configuration.
     public let config: SerenadaConfig

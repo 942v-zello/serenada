@@ -24,6 +24,8 @@ import app.serenada.core.call.SerenadaAudioCoordinator
 import app.serenada.core.call.AudioDeviceKind
 import app.serenada.core.call.dedupeParticipants
 import app.serenada.core.call.resolveHostPeerId
+import app.serenada.core.call.CallQualityTracker
+import app.serenada.core.call.ReconnectReason
 import app.serenada.core.call.ConnectionStatusTracker
 import app.serenada.core.call.FrameSnapshotCapture
 import app.serenada.core.call.JoinFlowCoordinator
@@ -125,6 +127,15 @@ class SerenadaSession internal constructor(
     private val _diagnostics = MutableStateFlow(CallDiagnostics())
     /** Real-time connection diagnostics (stats, transport state, ICE state). */
     val diagnostics: StateFlow<CallDiagnostics> = _diagnostics.asStateFlow()
+
+    /**
+     * Aggregate call-quality summary (telemetry §5). Reflects the live
+     * tracker while in-call and the finalized snapshot after the call ends;
+     * stays readable after teardown. Null before sampling begins (first
+     * InCall).
+     */
+    val qualitySummary: CallQualitySummary?
+        get() = _qualitySummary ?: qualityTracker.summarize()
 
     private val _availableAudioDevices = MutableStateFlow<List<AudioDevice>>(emptyList())
     /** Audio routes currently published by the active coordinator. */
@@ -239,6 +250,27 @@ class SerenadaSession internal constructor(
     private val audioCoordinatorCollectorJobs = mutableListOf<Job>()
     private var audioCoordinatorDeactivationJob: Job? = null
     private var closed = false
+    // Telemetry §5: aggregate call-quality tracker, driven by explicit
+    // inputs. `_qualitySummary` is snapshotted at finalize and survives
+    // teardown so hosts can read it after the session stops.
+    private val qualityTracker = CallQualityTracker { event ->
+        // Guard the host callback (Kotlin callbacks can throw unchecked):
+        // a throwing `onConnectionEvent` must not unwind and skip the
+        // terminal `onSessionStateChanged` / `onSessionEnded` callbacks that
+        // run after the emit on terminal paths. Mirrors web's
+        // `dispatchConnectionEvent` try/catch (SerenadaSession.ts).
+        try {
+            delegate?.invoke()?.onConnectionEvent(this, event)
+        } catch (t: Throwable) {
+            logger?.log(
+                SerenadaLogLevel.ERROR,
+                "Session",
+                "onConnectionEvent listener failed for ${event::class.simpleName}: ${t.message}",
+            )
+        }
+    }
+    private var _qualitySummary: CallQualitySummary? = null
+    private var lastTrackedConnectionStatus: ConnectionStatus = ConnectionStatus.Connected
     private val connectionStatusTracker = ConnectionStatusTracker(
         handler = handler,
         getPhase = { _state.value.phase },
@@ -246,6 +278,7 @@ class SerenadaSession internal constructor(
         getCurrentStatus = { _state.value.connectionStatus },
         setConnectionStatus = { status ->
             if (_state.value.connectionStatus != status) updateState(_state.value.copy(connectionStatus = status))
+            feedQualityConnectionStatus(status)
         },
     )
     private val joinFlowCoordinator = JoinFlowCoordinator(
@@ -268,6 +301,10 @@ class SerenadaSession internal constructor(
             )
         },
         onJoinTimeout = {
+            if (qualityTracker.hasStartedSampling()) {
+                qualityTracker.reportReconnectFailed(ConnectionEvent.ReconnectFailedReason.TIMEOUT)
+            }
+            finalizeQuality()
             resetResources()
             updateState(
                 CallState(
@@ -309,8 +346,10 @@ class SerenadaSession internal constructor(
             hostCid = roomState.hostCid
             updateParticipants(roomState)
         },
-        onError = { callError ->
+        onError = { callError, serverCode ->
             joinFlowCoordinator.clearJoinTimeout()
+            maybeReportReconnectFailed(serverCode)
+            finalizeQuality()
             resetResources(clearRecovery = shouldClearRecovery(callError))
             updateState(
                 CallState(
@@ -376,6 +415,10 @@ class SerenadaSession internal constructor(
                     realtimeStats = merged,
                 )
             )
+            // Telemetry §5: feed the quality tracker. Sampling only begins
+            // once the tracker has seen the first InCall transition, so
+            // pre-call Waiting/Joining samples are ignored.
+            qualityTracker.onStatsSample(merged, this.clock.monotonicMs())
         },
         onRefreshRemoteParticipants = { refreshRemoteParticipants() },
     )
@@ -1357,6 +1400,10 @@ class SerenadaSession internal constructor(
             }
 
             val callError = CallError.ServerError(lastError?.message ?: "Failed to fetch ICE servers")
+            // Transport exhaustion: report via the synthetic code so the
+            // shared reason table classifies it as networkConnectivity.
+            maybeReportReconnectFailed("ICE_SERVER_FETCH_FAILED")
+            finalizeQuality()
             resetResources()
             updateState(
                 CallState(
@@ -1446,8 +1493,32 @@ class SerenadaSession internal constructor(
     // --- Internal: State ---
 
     private fun updateState(newState: CallState) {
+        val previousPhase = _state.value.phase
         _state.value = newState
+        // Telemetry §5: drive the quality tracker on phase transitions.
+        // Sampling/dropout tracking only begins once the tracker sees the
+        // first InCall transition.
+        if (newState.phase != previousPhase) {
+            qualityTracker.onPhaseTransition(newState.phase, clock.monotonicMs())
+        }
         delegate?.invoke()?.onSessionStateChanged(this, newState)
+    }
+
+    /**
+     * Feed a connection-status change to the quality tracker. The dropout
+     * **trigger** is derived at the transition: a degradation driven by lost
+     * signaling is `NETWORK_LOST`; an ICE/peer-level degradation while
+     * signaling is up is `UNKNOWN` (telemetry §5.1).
+     */
+    private fun feedQualityConnectionStatus(next: ConnectionStatus) {
+        if (next == lastTrackedConnectionStatus) return
+        val trigger = if (!_diagnostics.value.isSignalingConnected) {
+            DropoutTrigger.NETWORK_LOST
+        } else {
+            DropoutTrigger.UNKNOWN
+        }
+        qualityTracker.onConnectionStatusTransition(next, trigger, clock.monotonicMs())
+        lastTrackedConnectionStatus = next
     }
 
     private fun updateDiagnostics(newDiagnostics: CallDiagnostics) {
@@ -1718,7 +1789,34 @@ class SerenadaSession internal constructor(
 
     // --- Internal: Cleanup ---
 
+    /**
+     * Finalize the quality summary and snapshot it so it survives teardown.
+     * Must run BEFORE [resetResources]/`statsPoller.stop()`. Idempotent —
+     * the first call wins.
+     */
+    private fun finalizeQuality() {
+        if (_qualitySummary != null) return
+        qualityTracker.finalize(clock.monotonicMs())
+        _qualitySummary = qualityTracker.summarize()
+    }
+
+    /**
+     * Telemetry §5.1: emit `reconnectFailed` for a call that reached InCall
+     * when the local termination was driven by a concrete recovery-abandonment
+     * path — classified from the original signaling **code** via the shared
+     * [ReconnectReason] table (join hard-timeout / invalid-or-expired token /
+     * connection-failed / transport-exhaustion only). Arbitrary server errors
+     * (BAD_REQUEST, etc.) map to null and emit nothing. Never for user hangup
+     * or remote-ended. No-op once the tracker is finalized.
+     */
+    private fun maybeReportReconnectFailed(serverCode: String?) {
+        if (!qualityTracker.hasStartedSampling()) return
+        val reason = ReconnectReason.reasonForCode(serverCode) ?: return
+        qualityTracker.reportReconnectFailed(reason)
+    }
+
     private fun cleanupCall(reason: EndReason): Job {
+        finalizeQuality()
         updateState(_state.value.copy(phase = CallPhase.Ending))
         if (_diagnostics.value.isScreenSharing) webRtcEngine.stopScreenShare()
         val deactivationJob = resetResources(clearRecovery = true)
@@ -2006,6 +2104,10 @@ class SerenadaSession internal constructor(
     }
 
     private fun handleError(error: CallError) {
+        // Local failures (audio/media startup) are not recovery-abandonment
+        // paths — no signaling code, so no reconnectFailed event.
+        maybeReportReconnectFailed(null)
+        finalizeQuality()
         resetResources()
         updateState(
             CallState(

@@ -96,6 +96,7 @@ internal final class PeerConnectionSlot: PeerConnectionSlotProtocol {
         var inboundFrameWidth: Int = 0
         var inboundFrameHeight: Int = 0
         var inboundFramesDecoded: Int64 = 0
+        var inboundFramesDropped: Int64 = 0
 
         var inboundFreezeCount: Int64 = 0
         var inboundFreezeDurationSeconds: Double = 0
@@ -103,6 +104,17 @@ internal final class PeerConnectionSlot: PeerConnectionSlotProtocol {
         var inboundNackCount: Int64 = 0
         var inboundPliCount: Int64 = 0
         var inboundFirCount: Int64 = 0
+
+        // Number of inbound-rtp stats seen for this kind. Distinguishes a
+        // genuine 0 from "no inbound-rtp stat" so telemetry counters surface
+        // nil (unknown) rather than a fake 0 (telemetry §5.2/§5.3).
+        var inboundRtpCount: Int = 0
+        // Per-counter presence. A row can exist (inboundRtpCount > 0) yet omit
+        // a specific member; surface nil for that member alone, not a fake 0.
+        var sawPacketsReceived = false
+        var sawPacketsLost = false
+        var sawFramesDecoded = false
+        var sawFramesDropped = false
     }
 
     private enum Constants {
@@ -962,6 +974,13 @@ private extension PeerConnectionSlot {
             videoNackPerMin: videoNackPerMin,
             videoPliPerMin: videoPliPerMin,
             videoFirPerMin: videoFirPerMin,
+            // Telemetry §5.2/§5.3: nil (unknown) when the specific counter
+            // member was never present, never a fake 0. Per-field presence,
+            // not just per-kind.
+            videoFramesDecoded: video.sawFramesDecoded ? video.inboundFramesDecoded : nil,
+            videoFramesDropped: video.sawFramesDropped ? video.inboundFramesDropped : nil,
+            audioPacketsLost: audio.sawPacketsLost ? audio.inboundPacketsLost : nil,
+            audioPacketsReceived: audio.sawPacketsReceived ? audio.inboundPacketsReceived : nil,
             updatedAtMs: now
         )
     }
@@ -974,8 +993,15 @@ private extension PeerConnectionSlot {
     ) {
         switch stat.type {
         case "inbound-rtp":
-            totals.inboundPacketsReceived += memberInt64(stat, key: "packetsReceived") ?? 0
-            totals.inboundPacketsLost += max(0, memberInt64(stat, key: "packetsLost") ?? 0)
+            totals.inboundRtpCount += 1
+            if let packetsReceived = memberInt64(stat, key: "packetsReceived") {
+                totals.inboundPacketsReceived += packetsReceived
+                totals.sawPacketsReceived = true
+            }
+            if let packetsLost = memberInt64(stat, key: "packetsLost") {
+                totals.inboundPacketsLost += max(0, packetsLost)
+                totals.sawPacketsLost = true
+            }
             totals.inboundBytes += memberInt64(stat, key: "bytesReceived") ?? 0
 
             if let jitter = memberDouble(stat, key: "jitter") {
@@ -995,7 +1021,14 @@ private extension PeerConnectionSlot {
 
             totals.inboundFrameWidth = max(totals.inboundFrameWidth, Int(memberInt64(stat, key: "frameWidth") ?? 0))
             totals.inboundFrameHeight = max(totals.inboundFrameHeight, Int(memberInt64(stat, key: "frameHeight") ?? 0))
-            totals.inboundFramesDecoded += memberInt64(stat, key: "framesDecoded") ?? 0
+            if let framesDecoded = memberInt64(stat, key: "framesDecoded") {
+                totals.inboundFramesDecoded += framesDecoded
+                totals.sawFramesDecoded = true
+            }
+            if let framesDropped = memberInt64(stat, key: "framesDropped") {
+                totals.inboundFramesDropped += framesDropped
+                totals.sawFramesDropped = true
+            }
 
             totals.inboundFreezeCount += memberInt64(stat, key: "freezeCount") ?? 0
             totals.inboundFreezeDurationSeconds += memberDouble(stat, key: "totalFreezesDuration") ?? 0

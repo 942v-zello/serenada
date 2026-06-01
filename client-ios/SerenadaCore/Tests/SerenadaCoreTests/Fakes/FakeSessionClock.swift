@@ -16,6 +16,11 @@ final class FakeSessionClock: SessionClock {
         currentTimeMs
     }
 
+    // Monotonic advances in lockstep with wall-clock for deterministic tests.
+    func monotonicMs() -> Int64 {
+        currentTimeMs
+    }
+
     func sleep(nanoseconds: UInt64) async throws {
         let deadlineMs = currentTimeMs + Int64(nanoseconds / 1_000_000)
         let id = UUID()

@@ -6,6 +6,14 @@
  *
  * Usage:  node scripts/check-resilience-constants.mjs
  * Exit 0 on match, 1 on mismatch.
+ *
+ * Note: the telemetry MOS heuristic (overview §5.4) is a *formula*, not a
+ * numeric constant, so it cannot be guarded here. Cross-platform parity for
+ * MOS is instead locked by the checked-in golden test vector asserted
+ * identically in all three core test suites (web `mos.test.ts`, Android
+ * `MosTest.kt`, iOS `MosTests.swift`), and the MOS coefficients + the
+ * reconnect-reason table are diffed across platforms by
+ * `scripts/check-telemetry-parity.mjs`.
  */
 
 import { readFileSync } from 'fs';

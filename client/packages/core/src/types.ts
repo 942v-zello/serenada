@@ -220,6 +220,11 @@ export interface CreateRoomResult {
 export interface SerenadaSessionHandle {
     subscribe(callback: (state: CallState) => void): () => void;
     onPeerMessage(callback: (message: PeerMessage) => void): () => void;
+    /**
+     * Subscribe to connection-quality events (reconnected / reconnect failed).
+     * Returns an unsubscribe function. Mirrors {@link onPeerMessage}.
+     */
+    onConnectionEvent(callback: (event: ConnectionEvent) => void): () => void;
     leave(): void;
     end(): void;
     toggleAudio(): void;
@@ -244,6 +249,12 @@ export interface SerenadaSessionHandle {
     readonly localStream: MediaStream | null;
     readonly remoteStreams: Map<string, MediaStream>;
     readonly callStats: CallStats | null;
+    /**
+     * Aggregate call-quality summary (telemetry §5). Updated live during the
+     * call and finalized at end; readable after the session stops. `null`
+     * before sampling begins (first `inCall`).
+     */
+    readonly callQualitySummary: CallQualitySummary | null;
     readonly hasMultipleCameras: boolean;
     readonly canScreenShare: boolean;
     readonly isSignalingConnected: boolean;
@@ -274,8 +285,84 @@ export interface CallStats {
     videoFreezeCount60s: number | null;
     videoFreezeDuration60s: number | null;
     videoRetransmitPct: number | null;
+    /**
+     * Cumulative inbound-video `framesDecoded`, summed across peer slots.
+     * Surfaced so hosts can diff per video segment for
+     * `redacted-analytics-event.frames_dropped_pct` (telemetry §5.3).
+     */
+    videoFramesDecoded: number | null;
+    /** Cumulative inbound-video `framesDropped`, summed across peer slots. */
+    videoFramesDropped: number | null;
+    /**
+     * Cumulative inbound-audio `packetsLost`, summed across peer slots.
+     * Feeds the call-level delta-based packet-loss computation (telemetry
+     * §5.2) — do not median the cumulative loss percentage.
+     */
+    audioPacketsLost: number | null;
+    /** Cumulative inbound-audio `packetsReceived`, summed across peer slots. */
+    audioPacketsReceived: number | null;
     updatedAtMs: number;
 }
+
+/**
+ * Immutable snapshot of aggregate call quality, computed by the SDK and
+ * consumed by hosts to populate `redacted-analytics-event` analytics (telemetry §5).
+ * Updated live during the call and finalized at call end; remains readable
+ * after the session stops.
+ */
+export interface CallQualitySummary {
+    /**
+     * MOS estimate (telemetry §5.4 heuristic). `null` unless all of
+     * `medianLatencyMs`, `medianJitterMs`, and `packetLossPct` are defined.
+     */
+    mosScore: number | null;
+    /**
+     * Call-level audio rx packet loss percentage, computed from counter
+     * deltas over the in-call window (NOT a median of cumulative loss %).
+     * `null` until at least one usable audio-loss sample is seen.
+     */
+    packetLossPct: number | null;
+    /** Median of sampled `rttMs` (telemetry §5.2 median definition), or `null`. */
+    medianLatencyMs: number | null;
+    /** Median of sampled `audioJitterMs`, or `null`. */
+    medianJitterMs: number | null;
+    /** Number of dropout starts while in-call. */
+    countDisconnects: number;
+    /** Number of dropouts that recovered. */
+    countReconnects: number;
+    /** Σ of dropout interval durations in ms. */
+    totalDropoutDurationMs: number;
+    /**
+     * Count of stats samples that contributed ≥1 usable quality field (a
+     * latency/jitter gauge, or a loss interval that was actually accumulated).
+     * Diagnostic only — the MOS null policy gates on the three medians being
+     * non-null, not on this count.
+     */
+    qualitySampleCount: number;
+}
+
+/** Reason a dropout began, carried so hosts can distinguish recovery causes. */
+export type DropoutTrigger = 'networkLost' | 'unknown';
+
+/**
+ * Connection-quality event emitted by the SDK through {@link
+ * SerenadaSessionHandle.onConnectionEvent}. Hosts map these to the
+ * `redacted-analytics-event` / `redacted-analytics-event` analytics events
+ * (telemetry §5.1).
+ */
+export type ConnectionEvent =
+    | {
+          kind: 'reconnected';
+          /** Downtime of the recovered dropout, in ms. */
+          downtimeMs: number;
+          /** `networkLost` if the dropout began with signaling/network loss, else `unknown`. */
+          reason: DropoutTrigger;
+      }
+    | {
+          kind: 'reconnectFailed';
+          /** `timeout` (recovery window elapsed) or `networkConnectivity` (no network/transport). */
+          reason: 'timeout' | 'networkConnectivity';
+      };
 
 export type RoomOccupancy = RoomStatus;
 

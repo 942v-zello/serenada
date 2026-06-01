@@ -16,7 +16,10 @@ final class SignalingMessageRouter {
     private let onSignalingPayload: (_ message: SignalingMessage) -> Void
     private let onContentState: (_ payload: ContentStatePayload) -> Void
     private let onParticipantMediaState: (_ payload: MediaStatePayload) -> Void
-    private let onError: (_ error: CallError) -> Void
+    // `serverCode` is the original signaling error code (telemetry §5.1:
+    // preserved so the shared reconnect-reason table classifies the failure
+    // by its concrete code, not the coarse mapped `CallError` case).
+    private let onError: (_ error: CallError, _ serverCode: String?) -> Void
     private let sendMessage: (_ type: String, _ payload: JSONValue?, _ to: String?) -> Void
 
     init(
@@ -31,7 +34,7 @@ final class SignalingMessageRouter {
         onSignalingPayload: @escaping (_ message: SignalingMessage) -> Void,
         onContentState: @escaping (_ payload: ContentStatePayload) -> Void,
         onParticipantMediaState: @escaping (_ payload: MediaStatePayload) -> Void,
-        onError: @escaping (_ error: CallError) -> Void,
+        onError: @escaping (_ error: CallError, _ serverCode: String?) -> Void,
         sendMessage: @escaping (_ type: String, _ payload: JSONValue?, _ to: String?) -> Void
     ) {
         self.getClientId = getClientId
@@ -74,7 +77,7 @@ final class SignalingMessageRouter {
             onContentState(payload)
         case "error":
             let payload = ErrorPayload(from: message.payload)
-            onError(payload.toCallError())
+            onError(payload.toCallError(), payload.code)
         default:
             break
         }
@@ -186,7 +189,7 @@ final class SignalingMessageRouter {
 
     func processErrorEvent(_ event: ErrorEvent) {
         let payload = ErrorPayload(code: event.code, message: event.message, reason: nil)
-        onError(payload.toCallError())
+        onError(payload.toCallError(), payload.code)
     }
 
     // MARK: - Outbound Helpers

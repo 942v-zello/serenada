@@ -1,4 +1,4 @@
-import type { SerenadaConfig, CallState, CreateRoomResult, SerenadaSessionHandle } from './types.js';
+import type { SerenadaConfig, CallState, ConnectionEvent, CreateRoomResult, SerenadaSessionHandle } from './types.js';
 import { SerenadaSession } from './SerenadaSession.js';
 import { createRoomId } from './api/roomApi.js';
 import { buildRoomUrl } from './serverUrls.js';
@@ -110,6 +110,7 @@ export class SerenadaCore {
             get state() { return errorState; },
             subscribe(_cb: (state: CallState) => void) { return noop; },
             onPeerMessage(_cb: (message: PeerMessage) => void) { return noop; },
+            onConnectionEvent(_cb: (event: ConnectionEvent) => void) { return noop; },
             leave: noop,
             end: noop,
             toggleAudio: noop,
@@ -129,6 +130,7 @@ export class SerenadaCore {
             get localStream() { return null; },
             get remoteStreams() { return emptyMap; },
             get callStats() { return null; },
+            get callQualitySummary() { return null; },
             get hasMultipleCameras() { return false; },
             get canScreenShare() { return false; },
             get isSignalingConnected() { return false; },

@@ -13,6 +13,8 @@ import org.robolectric.shadows.ShadowLooper
 
 internal class FakeSessionClock(private var currentTimeMs: Long = 0L) : SessionClock {
     override fun nowMs(): Long = currentTimeMs
+    // Monotonic advances in lockstep with wall-clock for deterministic tests.
+    override fun monotonicMs(): Long = currentTimeMs
     fun advance(byMs: Long) { currentTimeMs += byMs }
 }
 
@@ -22,6 +24,7 @@ internal class TestSessionFactory(
     defaultVideoEnabled: Boolean = true,
     audioCoordinator: SerenadaAudioCoordinator? = null,
     config: SerenadaConfig? = null,
+    delegate: app.serenada.core.SerenadaCoreDelegate? = null,
 ) {
     val fakeProvider = FakeSignalingProvider(handlesReconnection = handlesReconnection)
     val fakeAudio = FakeAudioController()
@@ -37,7 +40,7 @@ internal class TestSessionFactory(
             audioCoordinator = audioCoordinator,
         ),
         context = RuntimeEnvironment.getApplication(),
-        delegate = null,
+        delegate = delegate?.let { d -> { d } },
         okHttpClient = OkHttpClient(),
         initialSignalingProvider = fakeProvider,
         audioController = fakeAudio,

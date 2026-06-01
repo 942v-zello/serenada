@@ -195,8 +195,14 @@ final class FakePeerConnectionSlot: PeerConnectionSlotProtocol {
 
     // MARK: - Stats
 
+    /// Stats returned from the next `collectRealtimeCallStats()` call. Tests
+    /// can set this to drive the StatsPoller merge + CallQualityTracker.
+    /// Defaults to `.empty`, matching the previous behavior.
+    var realtimeStatsSample: RealtimeCallStats = .empty
+    var collectRealtimeCallStatsCalls = 0
     func collectRealtimeCallStats(onComplete: @escaping (RealtimeCallStats) -> Void) {
-        onComplete(.empty)
+        collectRealtimeCallStatsCalls += 1
+        onComplete(realtimeStatsSample)
     }
 
     func collectRealtimeCallStatsAndSummary(onComplete: @escaping (RealtimeCallStats, String) -> Void) {

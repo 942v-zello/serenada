@@ -15,12 +15,24 @@ interface MediaTotals {
     inboundFrameWidth: number;
     inboundFrameHeight: number;
     inboundFramesDecoded: number;
+    inboundFramesDropped: number;
     inboundFreezeCount: number;
     inboundFreezeDurationSeconds: number;
     outboundPacketsSent: number;
     outboundBytes: number;
     outboundPacketsRetransmitted: number;
     remoteInboundPacketsLost: number;
+    // Number of inbound-rtp stats observed for this kind. Used to distinguish
+    // "counter genuinely 0" from "no inbound-rtp stat at all" so the telemetry
+    // counters surface `null` (unknown) rather than a fake 0 (telemetry §5.2/§5.3).
+    inboundRtpCount: number;
+    // Per-counter presence. A row can exist (inboundRtpCount > 0) yet omit a
+    // specific member (e.g. an older impl with no `framesDropped`); surface
+    // `null` for that member alone rather than a fake 0 (telemetry §5.2/§5.3).
+    sawPacketsReceived: boolean;
+    sawPacketsLost: boolean;
+    sawFramesDecoded: boolean;
+    sawFramesDropped: boolean;
 }
 
 interface StatsSample {
@@ -45,9 +57,13 @@ const createMediaTotals = (): MediaTotals => ({
     inboundConcealedSamples: 0, inboundTotalSamples: 0,
     inboundFpsSum: 0, inboundFpsCount: 0,
     inboundFrameWidth: 0, inboundFrameHeight: 0, inboundFramesDecoded: 0,
+    inboundFramesDropped: 0,
     inboundFreezeCount: 0, inboundFreezeDurationSeconds: 0,
     outboundPacketsSent: 0, outboundBytes: 0, outboundPacketsRetransmitted: 0,
     remoteInboundPacketsLost: 0,
+    inboundRtpCount: 0,
+    sawPacketsReceived: false, sawPacketsLost: false,
+    sawFramesDecoded: false, sawFramesDropped: false,
 });
 
 const asStatMap = (stat: RTCStats): Record<string, unknown> => stat as unknown as Record<string, unknown>;
@@ -148,8 +164,11 @@ export class CallStatsCollector {
                 const bucket = media[kind];
 
                 if (stat.type === 'inbound-rtp') {
-                    bucket.inboundPacketsReceived += getStatNumber(stat, 'packetsReceived') ?? 0;
-                    bucket.inboundPacketsLost += Math.max(0, getStatNumber(stat, 'packetsLost') ?? 0);
+                    bucket.inboundRtpCount += 1;
+                    const packetsReceived = getStatNumber(stat, 'packetsReceived');
+                    if (packetsReceived !== null) { bucket.inboundPacketsReceived += packetsReceived; bucket.sawPacketsReceived = true; }
+                    const packetsLost = getStatNumber(stat, 'packetsLost');
+                    if (packetsLost !== null) { bucket.inboundPacketsLost += Math.max(0, packetsLost); bucket.sawPacketsLost = true; }
                     bucket.inboundBytes += getStatNumber(stat, 'bytesReceived') ?? 0;
                     const jitter = getStatNumber(stat, 'jitter');
                     if (jitter !== null) { bucket.inboundJitterSumSeconds += jitter; bucket.inboundJitterCount += 1; }
@@ -162,7 +181,10 @@ export class CallStatsCollector {
                     bucket.inboundFpsCount += fps !== null ? 1 : 0;
                     bucket.inboundFrameWidth = Math.max(bucket.inboundFrameWidth, Math.round(getStatNumber(stat, 'frameWidth') ?? 0));
                     bucket.inboundFrameHeight = Math.max(bucket.inboundFrameHeight, Math.round(getStatNumber(stat, 'frameHeight') ?? 0));
-                    bucket.inboundFramesDecoded += getStatNumber(stat, 'framesDecoded') ?? 0;
+                    const framesDecoded = getStatNumber(stat, 'framesDecoded');
+                    if (framesDecoded !== null) { bucket.inboundFramesDecoded += framesDecoded; bucket.sawFramesDecoded = true; }
+                    const framesDropped = getStatNumber(stat, 'framesDropped');
+                    if (framesDropped !== null) { bucket.inboundFramesDropped += framesDropped; bucket.sawFramesDropped = true; }
                     bucket.inboundFreezeCount += getStatNumber(stat, 'freezeCount') ?? 0;
                     bucket.inboundFreezeDurationSeconds += getStatNumber(stat, 'totalFreezesDuration') ?? 0;
                     return;
@@ -242,6 +264,15 @@ export class CallStatsCollector {
                 audioRxKbps, audioTxKbps,
                 videoRxPacketLossPct, videoTxPacketLossPct, videoRxKbps, videoTxKbps,
                 videoFps, videoResolution, videoFreezeCount60s, videoFreezeDuration60s, videoRetransmitPct,
+                // Telemetry §5.2/§5.3: surface `null` (unknown) when the
+                // specific counter member was never present, never a fake 0 —
+                // a fake 0 would make the tracker compute packetLossPct=0 / MOS,
+                // and host frames-dropped pct would read as a clean 0% instead
+                // of unknown. Track presence per field, not just per kind.
+                videoFramesDecoded: media.video.sawFramesDecoded ? media.video.inboundFramesDecoded : null,
+                videoFramesDropped: media.video.sawFramesDropped ? media.video.inboundFramesDropped : null,
+                audioPacketsLost: media.audio.sawPacketsLost ? media.audio.inboundPacketsLost : null,
+                audioPacketsReceived: media.audio.sawPacketsReceived ? media.audio.inboundPacketsReceived : null,
                 updatedAtMs: now,
             };
 

@@ -161,7 +161,17 @@ internal class FakePeerConnectionSlot(
     override fun detachRemoteSink(sink: VideoSink) {
         detachRemoteSinkCalls += sink
     }
-    override fun collectWebRtcStats(onComplete: (String, RealtimeCallStats?) -> Unit) { onComplete("fake", null) }
+    /**
+     * Stats returned from the next `collectWebRtcStats()` call. Tests can set
+     * this to drive the StatsPoller merge + CallQualityTracker. Defaults to
+     * null (no stats), matching the previous behavior.
+     */
+    var realtimeStatsSample: RealtimeCallStats? = null
+    var collectWebRtcStatsCalls = 0
+    override fun collectWebRtcStats(onComplete: (String, RealtimeCallStats?) -> Unit) {
+        collectWebRtcStatsCalls += 1
+        onComplete("fake", realtimeStatsSample)
+    }
     /** Cumulative inbound bytes returned from the next `collectInboundBytes()` call. */
     var inboundBytesSample: Long = 0L
     var collectInboundBytesCalls = 0

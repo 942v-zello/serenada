@@ -31,8 +31,8 @@ dependencyResolutionManagement {
 
 // app/build.gradle.kts
 dependencies {
-    implementation("app.serenada:core:0.7.1")
-    implementation("app.serenada:call-ui:0.7.1")
+    implementation("app.serenada:core:0.8.0")
+    implementation("app.serenada:call-ui:0.8.0")
 }
 ```
 

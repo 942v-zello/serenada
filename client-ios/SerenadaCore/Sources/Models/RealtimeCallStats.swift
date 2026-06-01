@@ -23,6 +23,14 @@ public struct RealtimeCallStats: Equatable {
     public var videoNackPerMin: Double?
     public var videoPliPerMin: Double?
     public var videoFirPerMin: Double?
+    /// Cumulative inbound-video `framesDecoded`, summed across peer slots (telemetry §5.3).
+    public var videoFramesDecoded: Int64?
+    /// Cumulative inbound-video `framesDropped`, summed across peer slots.
+    public var videoFramesDropped: Int64?
+    /// Cumulative inbound-audio `packetsLost`, summed across peer slots (telemetry §5.2).
+    public var audioPacketsLost: Int64?
+    /// Cumulative inbound-audio `packetsReceived`, summed across peer slots.
+    public var audioPacketsReceived: Int64?
     public var updatedAtMs: Int64 = 0
 
     public static let empty = RealtimeCallStats()
@@ -40,6 +48,8 @@ public struct RealtimeCallStats: Equatable {
         videoFreezeCount60s: Int64? = nil, videoFreezeDuration60s: Double? = nil,
         videoRetransmitPct: Double? = nil, videoNackPerMin: Double? = nil,
         videoPliPerMin: Double? = nil, videoFirPerMin: Double? = nil,
+        videoFramesDecoded: Int64? = nil, videoFramesDropped: Int64? = nil,
+        audioPacketsLost: Int64? = nil, audioPacketsReceived: Int64? = nil,
         updatedAtMs: Int64 = 0
     ) {
         self.transportPath = transportPath
@@ -64,6 +74,10 @@ public struct RealtimeCallStats: Equatable {
         self.videoNackPerMin = videoNackPerMin
         self.videoPliPerMin = videoPliPerMin
         self.videoFirPerMin = videoFirPerMin
+        self.videoFramesDecoded = videoFramesDecoded
+        self.videoFramesDropped = videoFramesDropped
+        self.audioPacketsLost = audioPacketsLost
+        self.audioPacketsReceived = audioPacketsReceived
         self.updatedAtMs = updatedAtMs
     }
 }

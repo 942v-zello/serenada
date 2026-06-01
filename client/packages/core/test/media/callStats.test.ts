@@ -1,0 +1,92 @@
+import { describe, expect, it } from 'vitest';
+import { CallStatsCollector } from '../../src/media/callStats.js';
+
+/** Minimal fake RTCPeerConnection that returns a fixed stats report. */
+class FakeStatsPeerConnection {
+    constructor(private readonly report: RTCStatsReport) {}
+    async getStats(): Promise<RTCStatsReport> {
+        return this.report;
+    }
+}
+
+function makeReport(stats: Array<Record<string, unknown>>): RTCStatsReport {
+    return new Map<string, RTCStats>(
+        stats.map((s) => [s.id as string, s as unknown as RTCStats]),
+    ) as RTCStatsReport;
+}
+
+/**
+ * Drive the private `poll()` once with the given report and return the
+ * collector's emitted snapshot. `poll` is private, so we reach it via the
+ * collector instance — start() schedules a timer, but we invoke poll
+ * directly through the bracket accessor to keep the test synchronous.
+ */
+async function collectOnce(report: RTCStatsReport): Promise<ReturnType<CallStatsCollector['stats']['valueOf']> | null> {
+    const collector = new CallStatsCollector();
+    const pc = new FakeStatsPeerConnection(report) as unknown as RTCPeerConnection;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (collector as any).poll([pc]);
+    return collector.stats;
+}
+
+describe('CallStatsCollector counter surface', () => {
+    it('surfaces framesDecoded/framesDropped and audio packet counters, summed across slots', async () => {
+        const report = makeReport([
+            {
+                id: 'video-in', type: 'inbound-rtp', kind: 'video',
+                packetsReceived: 1000, packetsLost: 5, bytesReceived: 50000,
+                framesDecoded: 600, framesDropped: 12,
+            },
+            {
+                id: 'audio-in', type: 'inbound-rtp', kind: 'audio',
+                packetsReceived: 2000, packetsLost: 30, bytesReceived: 8000,
+            },
+        ]);
+        const stats = await collectOnce(report);
+        expect(stats).not.toBeNull();
+        expect(stats!.videoFramesDecoded).toBe(600);
+        expect(stats!.videoFramesDropped).toBe(12);
+        expect(stats!.audioPacketsLost).toBe(30);
+        expect(stats!.audioPacketsReceived).toBe(2000);
+    });
+
+    it('surfaces null (unknown) for a kind with no inbound-rtp stat, never a fake 0', async () => {
+        // Audio inbound present, but no video inbound-rtp at all.
+        const report = makeReport([
+            { id: 'audio-in', type: 'inbound-rtp', kind: 'audio', packetsReceived: 100, packetsLost: 0, bytesReceived: 1000 },
+        ]);
+        const stats = await collectOnce(report);
+        // Audio present → real values (including a genuine 0 loss).
+        expect(stats!.audioPacketsLost).toBe(0);
+        expect(stats!.audioPacketsReceived).toBe(100);
+        // No video inbound-rtp → null, not 0.
+        expect(stats!.videoFramesDecoded).toBeNull();
+        expect(stats!.videoFramesDropped).toBeNull();
+    });
+
+    it('surfaces null audio counters when there is no inbound-rtp audio stat', async () => {
+        const report = makeReport([
+            { id: 'video-in', type: 'inbound-rtp', kind: 'video', framesDecoded: 10, framesDropped: 1, bytesReceived: 2000 },
+        ]);
+        const stats = await collectOnce(report);
+        expect(stats!.audioPacketsLost).toBeNull();
+        expect(stats!.audioPacketsReceived).toBeNull();
+        expect(stats!.videoFramesDecoded).toBe(10);
+        expect(stats!.videoFramesDropped).toBe(1);
+    });
+
+    // #4 — per-FIELD presence: a row exists but omits one counter member.
+    it('surfaces null for a counter member the inbound-rtp row omits, not a fake 0', async () => {
+        const report = makeReport([
+            // Video row present with framesDecoded but NO framesDropped (older impl).
+            { id: 'video-in', type: 'inbound-rtp', kind: 'video', framesDecoded: 42, bytesReceived: 2000 },
+            // Audio row present with packetsReceived but NO packetsLost.
+            { id: 'audio-in', type: 'inbound-rtp', kind: 'audio', packetsReceived: 500, bytesReceived: 1000 },
+        ]);
+        const stats = await collectOnce(report);
+        expect(stats!.videoFramesDecoded).toBe(42);
+        expect(stats!.videoFramesDropped).toBeNull(); // member absent → null, not 0
+        expect(stats!.audioPacketsReceived).toBe(500);
+        expect(stats!.audioPacketsLost).toBeNull(); // member absent → null, not 0
+    });
+});

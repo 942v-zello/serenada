@@ -110,8 +110,15 @@ export class FakeMediaEngine {
         this.remoteStreams = new Map();
     }
 
+    /**
+     * Peer connections returned from `getPeerConnections()`. Tests can push
+     * fakes here (each with a `getStats()` returning an `RTCStatsReport`) so
+     * the real `CallStatsCollector` produces snapshots.
+     */
+    peerConnections: RTCPeerConnection[] = [];
+
     getPeerConnections(): RTCPeerConnection[] {
-        return [];
+        return this.peerConnections;
     }
 
     getPeerConnectionsMap(): Map<string, RTCPeerConnection> {

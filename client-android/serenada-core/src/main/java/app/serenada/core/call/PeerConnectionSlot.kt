@@ -60,6 +60,7 @@ internal class PeerConnectionSlot(
         var inboundFrameWidth: Int = 0,
         var inboundFrameHeight: Int = 0,
         var inboundFramesDecoded: Long = 0L,
+        var inboundFramesDropped: Long = 0L,
         var inboundFreezeCount: Long = 0L,
         var inboundFreezeDurationSeconds: Double = 0.0,
         var inboundNackCount: Long = 0L,
@@ -68,7 +69,17 @@ internal class PeerConnectionSlot(
         var outboundPacketsSent: Long = 0L,
         var outboundBytes: Long = 0L,
         var outboundPacketsRetransmitted: Long = 0L,
-        var remoteInboundPacketsLost: Long = 0L
+        var remoteInboundPacketsLost: Long = 0L,
+        // Number of inbound-rtp stats seen for this kind. Distinguishes a
+        // genuine 0 from "no inbound-rtp stat" so telemetry counters surface
+        // null (unknown) rather than a fake 0 (telemetry §5.2/§5.3).
+        var inboundRtpCount: Int = 0,
+        // Per-counter presence. A row can exist (inboundRtpCount > 0) yet omit
+        // a specific member; surface null for that member alone, not a fake 0.
+        var sawPacketsReceived: Boolean = false,
+        var sawPacketsLost: Boolean = false,
+        var sawFramesDecoded: Boolean = false,
+        var sawFramesDropped: Boolean = false
     )
 
     private data class RealtimeStatsSample(
@@ -847,8 +858,9 @@ internal class PeerConnectionSlot(
 
             when (stat.type) {
                 "inbound-rtp" -> {
-                    bucket.inboundPacketsReceived += memberLong(stat, "packetsReceived") ?: 0L
-                    bucket.inboundPacketsLost += max(0L, memberLong(stat, "packetsLost") ?: 0L)
+                    bucket.inboundRtpCount += 1
+                    memberLong(stat, "packetsReceived")?.let { bucket.inboundPacketsReceived += it; bucket.sawPacketsReceived = true }
+                    memberLong(stat, "packetsLost")?.let { bucket.inboundPacketsLost += max(0L, it); bucket.sawPacketsLost = true }
                     bucket.inboundBytes += memberLong(stat, "bytesReceived") ?: 0L
 
                     val jitter = memberDouble(stat, "jitter")
@@ -873,7 +885,8 @@ internal class PeerConnectionSlot(
                     bucket.inboundFrameWidth = max(bucket.inboundFrameWidth, frameWidth)
                     bucket.inboundFrameHeight = max(bucket.inboundFrameHeight, frameHeight)
 
-                    bucket.inboundFramesDecoded += memberLong(stat, "framesDecoded") ?: 0L
+                    memberLong(stat, "framesDecoded")?.let { bucket.inboundFramesDecoded += it; bucket.sawFramesDecoded = true }
+                    memberLong(stat, "framesDropped")?.let { bucket.inboundFramesDropped += it; bucket.sawFramesDropped = true }
                     bucket.inboundFreezeCount += memberLong(stat, "freezeCount") ?: 0L
                     bucket.inboundFreezeDurationSeconds += memberDouble(stat, "totalFreezesDuration") ?: 0.0
                     bucket.inboundNackCount += memberLong(stat, "nackCount") ?: 0L
@@ -1087,6 +1100,13 @@ internal class PeerConnectionSlot(
             videoNackPerMin = videoNackPerMin,
             videoPliPerMin = videoPliPerMin,
             videoFirPerMin = videoFirPerMin,
+            // Telemetry §5.2/§5.3: null (unknown) when the specific counter
+            // member was never present, never a fake 0. Per-field presence,
+            // not just per-kind.
+            videoFramesDecoded = if (video.sawFramesDecoded) video.inboundFramesDecoded else null,
+            videoFramesDropped = if (video.sawFramesDropped) video.inboundFramesDropped else null,
+            audioPacketsLost = if (audio.sawPacketsLost) audio.inboundPacketsLost else null,
+            audioPacketsReceived = if (audio.sawPacketsReceived) audio.inboundPacketsReceived else null,
             updatedAtMs = now,
         )
     }

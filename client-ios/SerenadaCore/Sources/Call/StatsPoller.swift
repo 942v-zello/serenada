@@ -91,6 +91,11 @@ final class StatsPoller {
             return values.reduce(0, +)
         }
 
+        func sumNonNilInt64(_ values: [Int64]) -> Int64? {
+            guard !values.isEmpty else { return nil }
+            return values.reduce(0, +)
+        }
+
         var merged = RealtimeCallStats.empty
         merged.transportPath = Array(Set(stats.compactMap(\.transportPath))).sorted().joined(separator: " | ")
         if merged.transportPath?.isEmpty == true {
@@ -118,6 +123,16 @@ final class StatsPoller {
         merged.videoNackPerMin = sumNonNil(stats.compactMap(\.videoNackPerMin))
         merged.videoPliPerMin = sumNonNil(stats.compactMap(\.videoPliPerMin))
         merged.videoFirPerMin = sumNonNil(stats.compactMap(\.videoFirPerMin))
+        // Telemetry §5.2/§5.3: sum cumulative counters across slots (nil when
+        // no slot reported the kind). CallQualityTracker / the host segment
+        // diff rebaseline when the *aggregate* delta goes negative (counter
+        // reset / slot teardown). In the dominant 1:1 case there is a single
+        // slot so this is exact; for mesh, a simultaneous reset of one slot
+        // masked by another slot's increase is an accepted approximation.
+        merged.videoFramesDecoded = sumNonNilInt64(stats.compactMap(\.videoFramesDecoded))
+        merged.videoFramesDropped = sumNonNilInt64(stats.compactMap(\.videoFramesDropped))
+        merged.audioPacketsLost = sumNonNilInt64(stats.compactMap(\.audioPacketsLost))
+        merged.audioPacketsReceived = sumNonNilInt64(stats.compactMap(\.audioPacketsReceived))
         merged.updatedAtMs = stats.map(\.updatedAtMs).max() ?? 0
         return merged
     }

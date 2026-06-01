@@ -26,7 +26,10 @@ internal class SignalingMessageRouter(
     // Mutation callbacks
     private val onJoined: (clientId: String, hostCid: String?, roomState: RoomState?, turnToken: String?, turnTTL: Long?, reconnectToken: String?, reconnectTokenTTL: Long?) -> Unit,
     private val onRoomStateUpdated: (RoomState) -> Unit,
-    private val onError: (CallError) -> Unit,
+    // `serverCode` is the original signaling error code (telemetry §5.1:
+    // preserved so the shared reconnect-reason table classifies the failure
+    // by its concrete code, not the coarse mapped `CallError` type).
+    private val onError: (callError: CallError, serverCode: String?) -> Unit,
     private val onRoomEnded: () -> Unit,
     private val onContentStateReceived: (fromCid: String, active: Boolean, contentType: String?) -> Unit,
     private val onMediaStateReceived: (fromCid: String, audioEnabled: Boolean?, videoEnabled: Boolean?) -> Unit,
@@ -154,7 +157,7 @@ internal class SignalingMessageRouter(
 
     fun processErrorEvent(event: ErrorEvent) {
         assertMainThread()
-        onError(mapError(event.code, event.message))
+        onError(mapError(event.code, event.message), event.code)
     }
 
     // --- Private handlers ---
@@ -190,7 +193,7 @@ internal class SignalingMessageRouter(
 
     private fun handleError(msg: SignalingMessage) {
         val payload = msg.payload.toErrorPayload()
-        onError(mapError(payload?.code, payload?.message))
+        onError(mapError(payload?.code, payload?.message), payload?.code)
     }
 
     private fun mapError(code: String?, message: String?): CallError = when (code) {

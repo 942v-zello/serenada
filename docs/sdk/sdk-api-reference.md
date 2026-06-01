@@ -93,6 +93,16 @@ The web SDK exposes `session.onPeerMessage(callback)` for transport-agnostic pee
 
 `subscribeToMessages()` is not part of the public web API surface anymore. The supported public hook is `onPeerMessage(...)`.
 
+### Call quality telemetry
+
+The SDK computes aggregate call quality for host analytics and exposes it additively (no existing signatures changed):
+
+- `session.callQualitySummary: CallQualitySummary | null` — an immutable snapshot (MOS estimate, audio `packetLossPct`, `medianLatencyMs` / `medianJitterMs`, `countDisconnects` / `countReconnects`, `totalDropoutDurationMs`). Updated live and finalized at call end; remains readable after the session stops. `mosScore` is `null` unless all of latency, jitter, and loss are available.
+- `session.onConnectionEvent(callback)` (web; the equivalent delegate/observer callback on Android and iOS) — emits `ConnectionEvent`s: `reconnected` (with `downtimeMs` and a `networkLost` / `unknown` reason) and `reconnectFailed` (`timeout` / `networkConnectivity`).
+- `CallStats` adds cumulative inbound counters `videoFramesDecoded`, `videoFramesDropped`, `audioPacketsLost`, `audioPacketsReceived`, so hosts can derive per-segment frame-drop and call-level packet loss from deltas (rather than averaging cumulative percentages).
+
+The MOS heuristic and the reconnect-reason mapping are identical across web, Android, and iOS, and are guarded by `scripts/check-telemetry-parity.mjs`.
+
 ### Audio coordinator APIs
 
 Android and iOS expose a pluggable audio coordination surface for hosts that need to own process-wide audio policy. The supported public surface is:

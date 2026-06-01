@@ -7,6 +7,10 @@ final class LiveSessionClock: SessionClock {
         Int64(Date().timeIntervalSince1970 * 1000)
     }
 
+    func monotonicMs() -> Int64 {
+        Int64(DispatchTime.now().uptimeNanoseconds / 1_000_000)
+    }
+
     func sleep(nanoseconds: UInt64) async throws {
         try await Task.sleep(nanoseconds: nanoseconds)
     }

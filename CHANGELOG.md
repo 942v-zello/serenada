@@ -4,6 +4,26 @@ All notable changes to the Serenada SDK are documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [0.8.0] — 2026-05-31
+
+### Added
+- Web, Android, iOS: call-quality telemetry surface for host analytics
+  (redacted-ticket). A new `CallQualitySummary` (MOS estimate, audio packet
+  loss, median latency/jitter, disconnect/reconnect counts, total
+  dropout duration) is computed by the SDK, updated live and finalized
+  at call end, and exposed to the host (`callQualitySummary`). A
+  `ConnectionEvent` stream (`reconnected` / `reconnectFailed`) is
+  delivered through the existing delegate/observer (web:
+  `onConnectionEvent`). The MOS heuristic and the reconnect-reason
+  table are shared across platforms and guarded by
+  `scripts/check-telemetry-parity.mjs`.
+- `CallStats` gains cumulative inbound counters `videoFramesDecoded`,
+  `videoFramesDropped`, `audioPacketsLost`, `audioPacketsReceived`
+  (summed across peer slots; `null` when absent).
+
+### Notes
+- Additive only — no existing delegate/handle signatures changed.
+
 ## [0.7.1] — 2026-05-26
 
 ### Fixed

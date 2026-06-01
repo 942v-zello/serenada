@@ -14,7 +14,8 @@ final class SessionTestHarness {
     init(
         roomId: String = "test-room-id",
         handlesReconnection: Bool = false,
-        config: SerenadaConfig? = nil
+        config: SerenadaConfig? = nil,
+        delegate: SerenadaCoreDelegate? = nil
     ) {
         self.fakeProvider = FakeSignalingProvider(handlesReconnection: handlesReconnection)
         var resolvedConfig = config ?? SerenadaConfig(signalingProvider: fakeProvider)
@@ -30,6 +31,7 @@ final class SessionTestHarness {
         self.session = SerenadaSession(
             roomId: roomId,
             config: resolvedConfig,
+            delegateProvider: delegate.map { d in { d } },
             initialSignalingProvider: fakeProvider,
             apiClient: fakeAPI,
             audioController: fakeAudio,
