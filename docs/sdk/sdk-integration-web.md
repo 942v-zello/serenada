@@ -9,7 +9,7 @@
 ## Installation
 
 ```bash
-npm install @agatx/serenada-core@0.8.0 @agatx/serenada-react-ui@0.8.0 lucide-react
+npm install @agatx/serenada-core@0.8.2 @agatx/serenada-react-ui@0.8.2 lucide-react
 ```
 
 `@agatx/serenada-core` is framework-agnostic vanilla TypeScript. `@agatx/serenada-react-ui` provides ready-made React components.
@@ -57,11 +57,22 @@ function CallPage() {
     return (
         <SerenadaCallFlow
             session={session}
-            onDismiss={() => navigate('/')}
+            onEndCall={() => {
+                session.leave()
+                navigate('/')
+            }}
+            onDismiss={() => {
+                session.destroy()
+                navigate('/')
+            }}
         />
     )
 }
 ```
+
+If `onEndCall` is omitted, the prebuilt UI calls `session.leave()` before
+dismissing. When you provide `onEndCall`, your host owns the end button behavior,
+including leaving or destroying the session and updating navigation state.
 
 ## Create a Room
 

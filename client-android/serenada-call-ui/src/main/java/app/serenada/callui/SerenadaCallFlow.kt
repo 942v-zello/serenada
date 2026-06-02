@@ -57,13 +57,16 @@ private val FRONTLINE_CAMERA_MODES =
  * @param onShareLink Called when the user taps the share-link control. Pass `null` to hide it.
  * @param onInviteToRoom Called when the user taps the invite control. Pass `null` to hide it.
  * @param onRemoteVideoFitChanged Called when the user toggles remote video fit/fill mode.
+ * @param onEndCall Called when the user taps the end-call button. When `null`, the session leaves directly.
+ *   When provided, the host owns any cleanup and dismissal for that button path.
  * @param onStartScreenShare Called with the [MediaProjection][android.media.projection.MediaProjection]
  *   consent intent when the user starts screen sharing. Use this to start a foreground service with
  *   [FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION][android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION]
  *   before the projection begins. When `null`, the session handles screen sharing directly.
  * @param onStopScreenShare Called when the user stops screen sharing. Use this to downgrade the
  *   foreground service type. When `null`, the session handles it directly.
- * @param onDismiss Called when the call ends and the UI should be dismissed.
+ * @param onDismiss Called when the call ends and the UI should be dismissed, excluding a custom
+ *   [onEndCall] button path.
  */
 @Composable
 fun SerenadaCallFlow(
@@ -77,6 +80,7 @@ fun SerenadaCallFlow(
     onShareLink: (() -> Unit)? = null,
     onInviteToRoom: (() -> Unit)? = null,
     onRemoteVideoFitChanged: ((Boolean) -> Unit)? = null,
+    onEndCall: (() -> Unit)? = null,
     onStartScreenShare: ((Intent) -> Unit)? = null,
     onStopScreenShare: (() -> Unit)? = null,
     onSnapshotCaptured: ((SnapshotResult) -> Unit)? = null,
@@ -122,6 +126,7 @@ fun SerenadaCallFlow(
     var pendingPermissions by remember(activeSession) { mutableStateOf<List<app.serenada.core.MediaCapability>?>(null) }
     var pendingPermissionPurpose by remember(activeSession) { mutableStateOf<PermissionRequestPurpose?>(null) }
     var hasStarted by remember(activeSession) { mutableStateOf(false) }
+    var skipNextIdleDismiss by remember(activeSession) { mutableStateOf(false) }
 
     val permissionLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { result ->
@@ -167,7 +172,11 @@ fun SerenadaCallFlow(
         if (state.phase != CallPhase.Idle) {
             hasStarted = true
         } else if (hasStarted) {
-            onDismiss()
+            if (skipNextIdleDismiss) {
+                skipNextIdleDismiss = false
+            } else {
+                onDismiss()
+            }
         }
     }
 
@@ -219,7 +228,12 @@ fun SerenadaCallFlow(
         onFlipCamera = { activeSession.flipCamera() },
         onToggleFlashlight = { activeSession.toggleFlashlight() },
         onLocalPinchZoom = { scaleFactor -> activeSession.adjustLocalCameraZoom(scaleFactor) },
-        onEndCall = { activeSession.leave() },
+        onEndCall = onEndCall?.let { customEndCall ->
+            {
+                skipNextIdleDismiss = true
+                customEndCall()
+            }
+        } ?: { activeSession.leave() },
         onSelectAudioDevice = { device -> activeSession.selectAudioDevice(device) },
         onShareLink = onShareLink,
         onInviteToRoom = { onInviteToRoom?.invoke() },

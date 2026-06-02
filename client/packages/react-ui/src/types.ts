@@ -172,8 +172,10 @@ export interface CallFlowProps {
     strings?: Partial<Record<SerenadaString, string>>;
     /** Optional host-app controls rendered in the waiting screen below default invite controls. */
     waitingActions?: ReactNode;
-    /** Called when the user dismisses the call UI (end/leave/cancel). */
+    /** Called when the call UI dismisses itself, such as cancel or the default end-call behavior. */
     onDismiss?: () => void;
+    /** Called when the user taps the end-call button. When set, the host owns leaving and dismissal. */
+    onEndCall?: () => void;
     /** Callback fired when call stats are updated for host-owned diagnostics or bridge code. */
     onStatsUpdate?: (stats: CallStats | null) => void;
     /**
