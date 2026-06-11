@@ -215,18 +215,24 @@ internal class PeerNegotiationEngine(
 
     private fun getOrCreateSlot(remoteCid: String): PeerConnectionSlotProtocol {
         getSlot(remoteCid)?.let { return it }
+        var callbackSlot: PeerConnectionSlotProtocol? = null
         val slot = createSlotViaEngine(
             remoteCid,
             { cid: String, candidate: IceCandidate ->
-                val payload = JSONObject().apply {
-                    val candidateJson = JSONObject()
-                    candidateJson.put("candidate", candidate.sdp)
-                    candidateJson.put("sdpMid", candidate.sdpMid)
-                    candidateJson.put("sdpMLineIndex", candidate.sdpMLineIndex)
-                    put("candidate", candidateJson)
-                    currentLocalOfferId(cid)?.let { put("offerId", it) }
+                // Fires on the WebRTC signaling thread; negotiation state
+                // (offer ids) and the transport are main-thread-owned.
+                handler.post {
+                    if (getSlot(cid) !== callbackSlot) return@post
+                    val payload = JSONObject().apply {
+                        val candidateJson = JSONObject()
+                        candidateJson.put("candidate", candidate.sdp)
+                        candidateJson.put("sdpMid", candidate.sdpMid)
+                        candidateJson.put("sdpMLineIndex", candidate.sdpMLineIndex)
+                        put("candidate", candidateJson)
+                        currentLocalOfferId(cid)?.let { put("offerId", it) }
+                    }
+                    sendMessage("ice", payload, cid)
                 }
-                sendMessage("ice", payload, cid)
             },
             { _, _ ->
                 handler.post { onRemoteParticipantsChanged() }
@@ -287,6 +293,7 @@ internal class PeerNegotiationEngine(
                 }
             }
         )
+        callbackSlot = slot
         setSlot(remoteCid, slot)
         return slot
     }
@@ -583,12 +590,17 @@ internal class PeerNegotiationEngine(
         val started = slot.createOffer(
             iceRestart = iceRestart,
             onSdp = { sdp ->
-                val payload = JSONObject().apply {
-                    put("sdp", sdp)
-                    put("offerId", offerId)
+                // Fires on the WebRTC signaling thread; the transport and the
+                // offer-timeout bookkeeping are main-thread-owned.
+                handler.post {
+                    if (pendingLocalOfferIds[slot.remoteCid] != offerId) return@post
+                    val payload = JSONObject().apply {
+                        put("sdp", sdp)
+                        put("offerId", offerId)
+                    }
+                    sendMessage("offer", payload, slot.remoteCid)
+                    scheduleOfferTimeout(slot.remoteCid)
                 }
-                sendMessage("offer", payload, slot.remoteCid)
-                scheduleOfferTimeout(slot.remoteCid)
             },
             onComplete = { success ->
                 handler.post {
@@ -783,10 +795,20 @@ internal class PeerNegotiationEngine(
         val slot = getSlot(remoteCid) ?: return
         if (!canOffer(slot)) { slot.markPendingIceRestart(); return }
         if (slot.iceRestartTask != null) return
-        if (slot.lastIceRestartAt > 0 && clock.nowMs() - slot.lastIceRestartAt < WebRtcResilienceConstants.ICE_RESTART_COOLDOWN_MS) return
+        // Inside the cooldown window, defer to its expiry instead of dropping:
+        // ICE state changes are edge-triggered, so a dropped restart for a
+        // connection parked in FAILED would never be retried. Clamp to one
+        // cooldown: nowMs() is wall-clock, so a backwards step would otherwise
+        // park the restart for the full skew.
+        val cooldownRemainingMs = if (slot.lastIceRestartAt > 0) {
+            (slot.lastIceRestartAt + WebRtcResilienceConstants.ICE_RESTART_COOLDOWN_MS - clock.nowMs())
+                .coerceIn(0L, WebRtcResilienceConstants.ICE_RESTART_COOLDOWN_MS)
+        } else {
+            0L
+        }
         val runnable = Runnable { slot.cancelIceRestartTask(); triggerIceRestart(remoteCid, reason) }
         slot.setIceRestartTask(runnable)
-        handler.postDelayed(runnable, delayMs)
+        handler.postDelayed(runnable, maxOf(delayMs, cooldownRemainingMs))
     }
 
     private fun clearIceRestartTimer(remoteCid: String? = null) {

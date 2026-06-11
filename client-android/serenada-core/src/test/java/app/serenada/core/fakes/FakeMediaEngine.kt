@@ -24,6 +24,7 @@ internal class FakeMediaEngine : SessionMediaEngine {
     val removedSlots = mutableListOf<PeerConnectionSlotProtocol>()
     val fakeSlots = mutableMapOf<String, FakePeerConnectionSlot>()
     var failNextCreatedSlotRemoteOffer = false
+    var deferNextCreatedSlotOfferSdp = false
 
     private var _iceServers: List<PeerConnection.IceServer>? = null
 
@@ -63,6 +64,7 @@ internal class FakeMediaEngine : SessionMediaEngine {
         createdSlotCids.add(remoteCid)
         val slot = FakePeerConnectionSlot(
             remoteCid = remoteCid,
+            onLocalIceCandidate = onLocalIceCandidate,
             onConnectionStateChange = onConnectionStateChange,
             onIceConnectionStateChange = onIceConnectionStateChange,
             onSignalingStateChange = onSignalingStateChange,
@@ -71,6 +73,10 @@ internal class FakeMediaEngine : SessionMediaEngine {
         if (failNextCreatedSlotRemoteOffer) {
             slot.failNextRemoteOffer = true
             failNextCreatedSlotRemoteOffer = false
+        }
+        if (deferNextCreatedSlotOfferSdp) {
+            slot.deferNextOfferSdp = true
+            deferNextCreatedSlotOfferSdp = false
         }
         fakeSlots[remoteCid] = slot
         _iceServers?.let(slot::setIceServers)

@@ -75,6 +75,46 @@ class SessionNegotiationTest {
     }
 
     @Test
+    fun `stale deferred local offer is not sent after pending offer clears`() {
+        factory.fakeMedia.deferNextCreatedSlotOfferSdp = true
+        factory.advanceToInCallWithTurn(localCid = "alpha", remoteCid = "remote", localJoinedAt = 1, remoteJoinedAt = 2)
+
+        val fakeSlot = factory.fakeMedia.fakeSlots["remote"]
+        assertNotNull("Slot should be created", fakeSlot)
+        assertTrue("Deferred offer should not be sent yet", factory.fakeProvider.sentMessages("offer").isEmpty())
+
+        factory.simulateRoomState(participants = listOf("alpha" to 1L), hostCid = "alpha")
+        fakeSlot!!.flushPendingOfferSdp()
+        ShadowLooper.idleMainLooper()
+
+        assertTrue("Stale offer must not be sent after peer leaves", factory.fakeProvider.sentMessages("offer").isEmpty())
+    }
+
+    @Test
+    fun `stale local ICE from replaced slot is not sent`() {
+        factory.advanceToInCallWithTurn(localCid = "alpha", remoteCid = "remote", localJoinedAt = 1, remoteJoinedAt = 2)
+
+        val staleSlot = factory.fakeMedia.fakeSlots["remote"]
+        assertNotNull("Original slot should be created", staleSlot)
+
+        factory.simulateRoomState(participants = listOf("alpha" to 1L), hostCid = "alpha")
+        factory.simulateRoomState(participants = listOf("alpha" to 1L, "remote" to 3L), hostCid = "alpha")
+        val replacementSlot = factory.fakeMedia.fakeSlots["remote"]
+        assertNotNull("Replacement slot should be created", replacementSlot)
+        assertNotSame("Room rejoin should replace the slot", staleSlot, replacementSlot)
+
+        val iceMessagesBefore = factory.fakeProvider.sentMessages("ice").size
+        staleSlot!!.simulateLocalIceCandidate("candidate:stale-old-slot")
+        ShadowLooper.idleMainLooper()
+
+        val iceMessages = factory.fakeProvider.sentMessages("ice")
+        assertEquals("Stale slot ICE must not be sent", iceMessagesBefore, iceMessages.size)
+        assertFalse("Stale candidate must not be tagged onto replacement negotiation", iceMessages.any {
+            it.payload?.optJSONObject("candidate")?.optString("candidate") == "candidate:stale-old-slot"
+        })
+    }
+
+    @Test
     fun `local peer waits then answers when its peer ID sorts later`() {
         factory.advanceToInCallWithTurn(localCid = "zulu", remoteCid = "alpha", localJoinedAt = 2, remoteJoinedAt = 1)
 
@@ -271,6 +311,37 @@ class SessionNegotiationTest {
     fun `lexicographically higher peer ID does not send offer`() {
         factory.advanceToInCallWithTurn(localCid = "zulu", remoteCid = "alpha", localJoinedAt = 1, remoteJoinedAt = 2)
         assertTrue("Higher peer ID should not offer", factory.fakeProvider.sentMessages("offer").isEmpty())
+    }
+
+    @Test
+    fun `deferred ICE restart cooldown is capped when the wall clock moves backwards`() {
+        factory.advanceToInCallWithTurn(localCid = "alpha", remoteCid = "remote", localJoinedAt = 1, remoteJoinedAt = 2)
+
+        val fakeSlot = factory.fakeMedia.fakeSlots["remote"]
+        assertNotNull(fakeSlot)
+        // A backwards wall-clock step after a previous restart leaves
+        // lastIceRestartAt far in the future relative to nowMs().
+        fakeSlot!!.recordIceRestart(factory.fakeClock.nowMs() + WebRtcResilienceConstants.ICE_RESTART_COOLDOWN_MS * 10)
+        val offersBefore = fakeSlot.createOfferCalls
+
+        fakeSlot.simulateConnectionStateChange(PeerConnection.PeerConnectionState.FAILED)
+        ShadowLooper.idleMainLooper()
+        assertNotNull("ICE restart should be deferred, not dropped", fakeSlot.iceRestartTask)
+
+        ShadowLooper.idleMainLooper(WebRtcResilienceConstants.ICE_RESTART_COOLDOWN_MS, TimeUnit.MILLISECONDS)
+        ShadowLooper.idleMainLooper()
+
+        // The deferred runnable clears the task when it fires; an unclamped
+        // deferral would still be parked here (10x the cooldown away).
+        assertNull(
+            "Deferred restart must fire within one cooldown despite clock regression",
+            fakeSlot.iceRestartTask,
+        )
+        assertTrue(
+            "Restart offer should be sent once the clamped cooldown elapses",
+            fakeSlot.createOfferCalls > offersBefore,
+        )
+        assertEquals(true, fakeSlot.createOfferIceRestartFlags.last())
     }
 
     // Group 7: Timer-Based (Android-specific via ShadowLooper)
