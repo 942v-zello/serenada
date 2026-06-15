@@ -419,10 +419,19 @@ private struct SystemPictureInPictureHost: UIViewRepresentable {
         private var attachedSource: SystemPictureInPictureSource?
         private var currentParticipant: SystemPictureInPictureParticipant?
         private var currentAvatarImage: UIImage?
+        private var foregroundObserver: NSObjectProtocol?
+        private var isStoppingForForegroundActivation = false
 
         init(rendererProvider: CallRendererProvider) {
             self.rendererProvider = rendererProvider
             super.init()
+            registerForegroundObserver()
+        }
+
+        deinit {
+            if let foregroundObserver {
+                NotificationCenter.default.removeObserver(foregroundObserver)
+            }
         }
 
         func configure(sourceView: SystemPictureInPictureSourceView) {
@@ -436,7 +445,7 @@ private struct SystemPictureInPictureHost: UIViewRepresentable {
             sourceView?.update(
                 participant: participant,
                 avatarImage: avatarImage,
-                placeholderVisible: controller?.isPictureInPictureActive == true
+                placeholderVisible: controller?.isPictureInPictureActive == true && !isStoppingForForegroundActivation
             )
 
             guard enabled else {
@@ -493,6 +502,8 @@ private struct SystemPictureInPictureHost: UIViewRepresentable {
             contentController = nil
             currentParticipant = nil
             currentAvatarImage = nil
+            isStoppingForForegroundActivation = false
+            removeForegroundObserver()
         }
 
         private func ensureController() {
@@ -547,22 +558,52 @@ private struct SystemPictureInPictureHost: UIViewRepresentable {
         }
 
         func pictureInPictureControllerWillStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+            isStoppingForForegroundActivation = false
             updateSourcePlaceholder(visible: true, animated: false)
             attachCurrentRenderer()
         }
 
         func pictureInPictureControllerDidStartPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
+            isStoppingForForegroundActivation = false
             updateSourcePlaceholder(visible: true, animated: false)
             attachCurrentRenderer()
         }
 
         func pictureInPictureControllerWillStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
-            updateSourcePlaceholder(visible: true, animated: false)
+            updateSourcePlaceholder(visible: !isStoppingForForegroundActivation, animated: false)
         }
 
         func pictureInPictureControllerDidStopPictureInPicture(_ pictureInPictureController: AVPictureInPictureController) {
             updateSourcePlaceholder(visible: false, animated: true)
             detachRenderer()
+            isStoppingForForegroundActivation = false
+        }
+
+        private func registerForegroundObserver() {
+            foregroundObserver = NotificationCenter.default.addObserver(
+                forName: UIApplication.didBecomeActiveNotification,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.stopPictureInPictureForForegroundActivation()
+                }
+            }
+        }
+
+        private func removeForegroundObserver() {
+            if let foregroundObserver {
+                NotificationCenter.default.removeObserver(foregroundObserver)
+                self.foregroundObserver = nil
+            }
+        }
+
+        private func stopPictureInPictureForForegroundActivation() {
+            guard controller?.isPictureInPictureActive == true,
+                  !isStoppingForForegroundActivation else { return }
+            isStoppingForForegroundActivation = true
+            sourceView?.setPlaceholderVisible(false, animated: false)
+            controller?.stopPictureInPicture()
         }
 
         private func updateSourcePlaceholder(visible: Bool, animated: Bool) {
