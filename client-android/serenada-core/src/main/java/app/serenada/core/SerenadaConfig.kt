@@ -35,6 +35,13 @@ data class SerenadaConfig(
     val cameraModes: List<LocalCameraMode>? = null,
     /** Enable experimental HD video capture. */
     val isHdVideoExperimentalEnabled: Boolean = false,
+    /**
+     * When true, defer the initial-negotiation offer-timeout/ICE-restart while the host peer
+     * awaits its FIRST answer. For app-owned calls whose answer is gated on a remote action that
+     * may take much longer than the offer timeout (e.g. PSTN human pickup). Normal offer-timeout
+     * behavior resumes after the first answer. Default false = unchanged for existing calls.
+     */
+    val deferInitialAnswer: Boolean = false,
     /** Preferred signaling transports in priority order (default: WS then SSE). */
     val transports: List<SerenadaTransport> = listOf(SerenadaTransport.WS, SerenadaTransport.SSE),
     /** Whether the proximity sensor is used to switch audio to the earpiece and pause video (default false). */

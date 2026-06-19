@@ -22,6 +22,7 @@ internal class TestSessionFactory(
     val roomId: String = "test-room-id",
     val handlesReconnection: Boolean = false,
     defaultVideoEnabled: Boolean = true,
+    deferInitialAnswer: Boolean = false,
     audioCoordinator: SerenadaAudioCoordinator? = null,
     config: SerenadaConfig? = null,
     delegate: app.serenada.core.SerenadaCoreDelegate? = null,
@@ -37,6 +38,7 @@ internal class TestSessionFactory(
         config = config ?: SerenadaConfig(
             signalingProvider = fakeProvider,
             defaultVideoEnabled = defaultVideoEnabled,
+            deferInitialAnswer = deferInitialAnswer,
             audioCoordinator = audioCoordinator,
         ),
         context = RuntimeEnvironment.getApplication(),
@@ -148,6 +150,7 @@ internal class TestSessionFactory(
         remoteCid: String = "remote-cid-1",
         localJoinedAt: Long = 1L,
         remoteJoinedAt: Long = 2L,
+        hostCid: String = minOf(localCid, remoteCid),
         iceServers: List<PeerConnection.IceServer> = listOf(
             PeerConnection.IceServer.builder("turn:turn.example.com:3478")
                 .setUsername("user")
@@ -161,7 +164,7 @@ internal class TestSessionFactory(
         simulateJoinedResponse(
             cid = localCid,
             participants = listOf(localCid to localJoinedAt, remoteCid to remoteJoinedAt),
-            hostCid = localCid,
+            hostCid = hostCid,
         )
     }
 

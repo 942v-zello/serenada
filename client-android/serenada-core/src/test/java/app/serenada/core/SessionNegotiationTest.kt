@@ -53,9 +53,9 @@ class SessionNegotiationTest {
         }
     }
 
-    private fun resetFactory() {
+    private fun resetFactory(deferInitialAnswer: Boolean = false) {
         factory.tearDown()
-        factory = TestSessionFactory()
+        factory = TestSessionFactory(deferInitialAnswer = deferInitialAnswer)
     }
 
     private fun latestOfferId(): String {
@@ -362,6 +362,32 @@ class SessionNegotiationTest {
     fun `lexicographically higher peer ID does not send offer`() {
         factory.advanceToInCallWithTurn(localCid = "zulu", remoteCid = "alpha", localJoinedAt = 1, remoteJoinedAt = 2)
         assertTrue("Higher peer ID should not offer", factory.fakeProvider.sentMessages("offer").isEmpty())
+    }
+
+    @Test
+    fun `two party host sends offer even when peer ID sorts later`() {
+        resetFactory(deferInitialAnswer = true)
+        factory.advanceToInCallWithTurn(
+            localCid = "zulu",
+            remoteCid = "alpha",
+            localJoinedAt = 1,
+            remoteJoinedAt = 2,
+            hostCid = "zulu",
+        )
+        assertTrue("Two-party host should offer", factory.fakeProvider.sentMessages("offer").isNotEmpty())
+    }
+
+    @Test
+    fun `two party non-host does not offer even when peer ID sorts earlier`() {
+        resetFactory(deferInitialAnswer = true)
+        factory.advanceToInCallWithTurn(
+            localCid = "alpha",
+            remoteCid = "zulu",
+            localJoinedAt = 1,
+            remoteJoinedAt = 2,
+            hostCid = "zulu",
+        )
+        assertTrue("Two-party non-host should not offer", factory.fakeProvider.sentMessages("offer").isEmpty())
     }
 
     @Test
