@@ -10,6 +10,7 @@ final class PeerNegotiationEngine {
     // State readers
     private let getClientId: () -> String?
     private let getHostCid: () -> String?
+    private let deferInitialAnswer: () -> Bool
     private let getInternalPhase: () -> CallPhase
     private let getParticipantCount: () -> Int
     private let getCurrentRoomState: () -> RoomState?
@@ -48,6 +49,7 @@ final class PeerNegotiationEngine {
     private var currentNegotiationIds: [String: String] = [:]
     private var ignoredOfferIds: [String: String] = [:]
     private var settingRemoteAnswerCids: Set<String> = []
+    private var initialAnswerReceivedCids: Set<String> = []
     private var pendingRemoteIceByOfferId: [String: [String: [IceCandidatePayload]]] = [:]
     private var participantStatuses: [String: ParticipantSignalingStatus] = [:]
     private var outboundMediaWatchByCid: [String: OutboundMediaWatch] = [:]
@@ -64,6 +66,7 @@ final class PeerNegotiationEngine {
         clock: SessionClock,
         getClientId: @escaping () -> String?,
         getHostCid: @escaping () -> String?,
+        deferInitialAnswer: @escaping () -> Bool = { false },
         getInternalPhase: @escaping () -> CallPhase,
         getParticipantCount: @escaping () -> Int,
         getCurrentRoomState: @escaping () -> RoomState?,
@@ -93,6 +96,7 @@ final class PeerNegotiationEngine {
         self.clock = clock
         self.getClientId = getClientId
         self.getHostCid = getHostCid
+        self.deferInitialAnswer = deferInitialAnswer
         self.getInternalPhase = getInternalPhase
         self.getParticipantCount = getParticipantCount
         self.getCurrentRoomState = getCurrentRoomState
@@ -130,6 +134,7 @@ final class PeerNegotiationEngine {
             clearOfferTimeout()
             clearIceRestartTimer()
             participantStatuses.removeAll()
+            initialAnswerReceivedCids.removeAll()
         }
 
         if remoteParticipants.count >= 1 {
@@ -249,6 +254,7 @@ final class PeerNegotiationEngine {
         participantStatuses.removeAll()
         outboundMediaWatchByCid.removeAll()
         lastMediaRestartHandledAtByCid.removeAll()
+        initialAnswerReceivedCids.removeAll()
     }
 
     func recoverStalledOutboundMedia() {
@@ -369,6 +375,7 @@ final class PeerNegotiationEngine {
         clearOfferTimeout(remoteCid: remoteCid)
         clearIceRestartTimer(remoteCid: remoteCid)
         clearNegotiationState(remoteCid: remoteCid)
+        initialAnswerReceivedCids.remove(remoteCid)
         participantStatuses.removeValue(forKey: remoteCid)
         outboundMediaWatchByCid.removeValue(forKey: remoteCid)
         lastMediaRestartHandledAtByCid.removeValue(forKey: remoteCid)
@@ -559,6 +566,7 @@ final class PeerNegotiationEngine {
                 self.settingRemoteAnswerCids.remove(remoteCid)
                 guard let slot else { return }
                 if success {
+                    self.initialAnswerReceivedCids.insert(remoteCid)
                     // The offer this answer completes is whatever was pending when we validated
                     // it above; `pendingOfferId` also covers the legacy/no-offerId path, where
                     // `offerId` is the sentinel rather than our real local id.
@@ -632,9 +640,24 @@ final class PeerNegotiationEngine {
 
     private func shouldIOffer(remoteCid: String, roomState: RoomState? = nil) -> Bool {
         guard let myCid = getClientId() else { return false }
-        if let roomState,
-           !roomState.participants.contains(where: { $0.cid == remoteCid }) {
+        let activeRoomState = roomState ?? getCurrentRoomState()
+        if let activeRoomState,
+           !activeRoomState.participants.contains(where: { $0.cid == remoteCid }) {
             return false
+        }
+        if deferInitialAnswer(), let activeRoomState {
+            let participantCids = Set(activeRoomState.participants.map(\.cid))
+            let hostCid: String?
+            if participantCids.contains(activeRoomState.hostCid) {
+                hostCid = activeRoomState.hostCid
+            } else if let fallbackHostCid = getHostCid(), participantCids.contains(fallbackHostCid) {
+                hostCid = fallbackHostCid
+            } else {
+                hostCid = nil
+            }
+            if participantCids.count <= 2, let hostCid {
+                return myCid == hostCid
+            }
         }
         return myCid < remoteCid
     }
@@ -744,6 +767,10 @@ final class PeerNegotiationEngine {
     private func handleMediaRestartRequest(slot: any PeerConnectionSlotProtocol, remoteCid: String, reason: String) {
         if reason == SignalingProtocolConstants.mediaRestartReasonLocalTrackNegotiation {
             handleLocalTrackNegotiationRequest(slot: slot, remoteCid: remoteCid)
+            return
+        }
+        if deferInitialAnswer(), !initialAnswerReceivedCids.contains(remoteCid) {
+            logger?.log(.debug, tag: "PeerNegotiationEngine", "Ignoring media restart for \(remoteCid) before first answer")
             return
         }
         guard canOffer(slot: slot) else { return }
@@ -885,6 +912,10 @@ final class PeerNegotiationEngine {
     ) {
         clearOfferTimeout(remoteCid: remoteCid)
         guard let slot = getSlot(remoteCid) else { return }
+        if deferInitialAnswer(), !initialAnswerReceivedCids.contains(remoteCid) {
+            logger?.log(.debug, tag: "PeerNegotiationEngine", "Deferring initial offer timeout for \(remoteCid)")
+            return
+        }
 
         slot.setOfferTimeoutTask(Task { [weak self] in
             guard let clock = self?.clock else { return }
@@ -932,6 +963,9 @@ final class PeerNegotiationEngine {
 
     func scheduleIceRestart(remoteCid: String, reason: String, delayMs: Int) {
         guard let slot = getSlot(remoteCid) else { return }
+        if deferInitialAnswer(), !initialAnswerReceivedCids.contains(remoteCid) {
+            return
+        }
         if !canOffer(slot: slot) {
             slot.markPendingIceRestart()
             return
@@ -976,6 +1010,10 @@ final class PeerNegotiationEngine {
     private func triggerIceRestart(remoteCid: String, reason: String) {
         guard let slot = getSlot(remoteCid) else { return }
         slot.cancelIceRestartTask()
+        if deferInitialAnswer(), !initialAnswerReceivedCids.contains(remoteCid) {
+            logger?.log(.debug, tag: "PeerNegotiationEngine", "Suppressing ICE restart for \(remoteCid) before first answer (\(reason))")
+            return
+        }
 
         guard canOffer(slot: slot) else {
             slot.markPendingIceRestart()

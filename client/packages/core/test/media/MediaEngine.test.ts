@@ -1030,6 +1030,63 @@ describe('MediaEngine', () => {
         expect(sentMessages.filter((message) => message.type === 'offer')).toHaveLength(0);
     });
 
+    it('lets the deferred two-party host offer even when its peer ID sorts later', async () => {
+        Object.defineProperty(globalThis, 'navigator', {
+            value: {
+                mediaDevices: {
+                    getUserMedia: vi.fn().mockResolvedValue(createMediaStream()),
+                    enumerateDevices: vi.fn().mockResolvedValue([]),
+                    addEventListener() {},
+                    removeEventListener() {},
+                },
+            },
+            configurable: true,
+        });
+        const sentMessages: Array<{ type: string; payload?: Record<string, unknown>; to?: string }> = [];
+        const engine = new MediaEngine({ initialVideoEnabled: false, deferInitialAnswer: true }, (type, payload, to) => {
+            sentMessages.push({ type, payload, to });
+        });
+
+        engine.updateSignalingConnected(true);
+        await engine.startLocalMedia();
+        engine.updateRoomState({
+            hostCid: 'zeta',
+            participants: [{ cid: 'zeta' }, { cid: 'alpha' }],
+        }, 'zeta');
+
+        await vi.waitFor(() => {
+            expect(sentMessages.filter((message) => message.type === 'offer')).toHaveLength(1);
+        });
+    });
+
+    it('keeps the deferred two-party non-host from offering even when its peer ID sorts earlier', async () => {
+        Object.defineProperty(globalThis, 'navigator', {
+            value: {
+                mediaDevices: {
+                    getUserMedia: vi.fn().mockResolvedValue(createMediaStream()),
+                    enumerateDevices: vi.fn().mockResolvedValue([]),
+                    addEventListener() {},
+                    removeEventListener() {},
+                },
+            },
+            configurable: true,
+        });
+        const sentMessages: Array<{ type: string; payload?: Record<string, unknown>; to?: string }> = [];
+        const engine = new MediaEngine({ initialVideoEnabled: false, deferInitialAnswer: true }, (type, payload, to) => {
+            sentMessages.push({ type, payload, to });
+        });
+
+        engine.updateSignalingConnected(true);
+        await engine.startLocalMedia();
+        engine.updateRoomState({
+            hostCid: 'zeta',
+            participants: [{ cid: 'alpha' }, { cid: 'zeta' }],
+        }, 'alpha');
+        await flushPromises();
+
+        expect(sentMessages.filter((message) => message.type === 'offer')).toHaveLength(0);
+    });
+
     it('restarts negotiation from the designated offerer when a peer reattaches', async () => {
         const getUserMedia = vi.fn().mockResolvedValue(createMediaStream());
         Object.defineProperty(globalThis, 'navigator', {

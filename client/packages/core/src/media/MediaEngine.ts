@@ -83,6 +83,8 @@ export interface MediaEngineConfig {
     initialVideoEnabled?: boolean;
     /** When `false`, the camera is never requested and video is always off. */
     videoCaptureSupported?: boolean;
+    /** Defer initial offer timeout/ICE restart while awaiting the first answer. */
+    deferInitialAnswer?: boolean;
 }
 
 export class MediaEngine {
@@ -123,11 +125,13 @@ export class MediaEngine {
     private heartbeatInterval: number | null = null;
     private outboundMediaWatchdogInterval: number | null = null;
     private mediaRestartHandledAtByCid = new Map<string, number>();
+    private initialAnswerReceivedCids = new Set<string>();
     private onlineHandler: (() => void) | null = null;
     private networkChangeHandler: (() => void) | null = null;
     private deviceChangeHandler: (() => void) | null = null;
     private deviceChangeSettleTimer: number | null = null;
     private turnsOnly: boolean;
+    private deferInitialAnswer: boolean;
     private logger?: SerenadaLogger;
     private offerSequence = 0;
 
@@ -143,6 +147,7 @@ export class MediaEngine {
         sendMessage: (type: string, payload?: Record<string, unknown>, to?: string) => void,
     ) {
         this.turnsOnly = config.turnsOnly ?? false;
+        this.deferInitialAnswer = config.deferInitialAnswer === true;
         this.logger = config.logger;
         this.facingMode = config.initialFacingMode ?? 'user';
         this.initialVideoEnabled = config.initialVideoEnabled !== false;
@@ -496,6 +501,7 @@ export class MediaEngine {
         this.remoteStreams = new Map();
         this.lastInboundBytesByCid.clear();
         this.mediaRestartHandledAtByCid.clear();
+        this.initialAnswerReceivedCids.clear();
         if (this.retryingTimer) { window.clearTimeout(this.retryingTimer); this.retryingTimer = null; }
         this.iceConnectionState = 'closed';
         this.connectionState = 'closed';
@@ -634,6 +640,7 @@ export class MediaEngine {
             }
             this.participantConnectionStatus.clear();
             this.mediaRestartHandledAtByCid.clear();
+            this.initialAnswerReceivedCids.clear();
             return;
         }
 
@@ -814,6 +821,7 @@ export class MediaEngine {
         this.lastInboundBytesByCid.delete(remoteCid);
         if (clearMediaRestartCooldown) {
             this.mediaRestartHandledAtByCid.delete(remoteCid);
+            this.initialAnswerReceivedCids.delete(remoteCid);
         }
         this.updateAggregateState();
     }
@@ -840,7 +848,18 @@ export class MediaEngine {
 
     private shouldIOffer(remoteCid: string): boolean {
         const myId = this.clientId;
-        return typeof myId === 'string' && myId.length > 0 && myId < remoteCid && this.isCurrentParticipant(remoteCid);
+        if (typeof myId !== 'string' || myId.length === 0 || !this.isCurrentParticipant(remoteCid)) {
+            return false;
+        }
+        if (this.deferInitialAnswer && this.roomState) {
+            const participantCids = new Set(this.roomState.participants?.map(p => p.cid) ?? []);
+            const candidateHostCid = this.roomState.hostCid;
+            const hostCid = typeof candidateHostCid === 'string' && participantCids.has(candidateHostCid) ? candidateHostCid : null;
+            if (participantCids.size <= 2 && hostCid) {
+                return myId === hostCid;
+            }
+        }
+        return myId < remoteCid;
     }
 
     private isParticipantActive(remoteCid: string): boolean {
@@ -899,6 +918,10 @@ export class MediaEngine {
             this.sendSignalingMessage('offer', { sdp: offer.sdp, offerId }, remoteCid);
 
             if (peer.offerTimeout) window.clearTimeout(peer.offerTimeout);
+            if (this.deferInitialAnswer && !this.initialAnswerReceivedCids.has(remoteCid)) {
+                this.logger?.log('debug', 'WebRTC', `[${remoteCid}] Deferring initial offer timeout`);
+                return;
+            }
             peer.offerTimeout = window.setTimeout(() => {
                 if (this.peers.get(remoteCid) !== peer) return;
                 peer.offerTimeout = null;
@@ -928,6 +951,9 @@ export class MediaEngine {
     private scheduleIceRestart(remoteCid: string, reason: string, delayMs: number): void {
         const peer = this.peers.get(remoteCid);
         if (!peer) return;
+        if (this.deferInitialAnswer && !this.initialAnswerReceivedCids.has(remoteCid)) {
+            return;
+        }
         if (!this.isSignalingConnected || !this.isParticipantActive(remoteCid)) { peer.pendingIceRestart = true; return; }
         if (peer.iceRestartTimer) return;
         // Inside the cooldown window, defer to its expiry instead of dropping:
@@ -946,6 +972,10 @@ export class MediaEngine {
     private async triggerIceRestart(remoteCid: string, reason: string): Promise<void> {
         const peer = this.peers.get(remoteCid);
         if (!peer) return;
+        if (this.deferInitialAnswer && !this.initialAnswerReceivedCids.has(remoteCid)) {
+            this.logger?.log('debug', 'WebRTC', `[${remoteCid}] Suppressing ICE restart before first answer (${reason})`);
+            return;
+        }
         if (!this.isSignalingConnected || !this.isParticipantActive(remoteCid)) { peer.pendingIceRestart = true; return; }
         if (!this.shouldIOffer(remoteCid)) return;
         if (peer.isMakingOffer) { peer.pendingIceRestart = true; return; }
@@ -1054,6 +1084,7 @@ export class MediaEngine {
             peer.isSettingRemoteAnswerPending = true;
             await peer.pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }));
             peer.isSettingRemoteAnswerPending = false;
+            this.initialAnswerReceivedCids.add(fromCid);
             const completedOfferId = pendingOfferId ?? offerId;
             // Finalize negotiation state only while the pending offer is still the one we
             // completed. The await above yields to the event loop, so a renegotiation offer
@@ -1863,6 +1894,10 @@ export class MediaEngine {
     private async handleMediaRestartRequest(fromCid: string, reason = ''): Promise<void> {
         if (reason === MEDIA_RESTART_REASON_LOCAL_TRACK_NEGOTIATION) {
             await this.handlePeerLocalTrackNegotiationRequest(fromCid);
+            return;
+        }
+        if (this.deferInitialAnswer && !this.initialAnswerReceivedCids.has(fromCid)) {
+            this.logger?.log('debug', 'WebRTC', `[${fromCid}] Ignoring media restart before first answer`);
             return;
         }
         const now = Date.now();

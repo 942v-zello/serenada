@@ -46,9 +46,9 @@ final class SessionNegotiationTests: XCTestCase {
         }
     }
 
-    private func resetHarness() {
+    private func resetHarness(deferInitialAnswer: Bool = false) {
         harness.tearDown()
-        harness = SessionTestHarness()
+        harness = SessionTestHarness(deferInitialAnswer: deferInitialAnswer)
     }
 
     private func sharedNegotiationScenarios() throws -> [SharedNegotiationScenario] {
@@ -419,6 +419,37 @@ final class SessionNegotiationTests: XCTestCase {
 
         let offerMessages = harness.fakeProvider.sentPeerMessages(ofType: "offer")
         XCTAssertTrue(offerMessages.isEmpty, "Higher peer ID should not send offer")
+    }
+
+    func testDeferredTwoPartyHostOffersEvenWhenPeerIdSortsLater() async throws {
+        resetHarness(deferInitialAnswer: true)
+        await harness.advanceToInCallWithTurn(
+            localCid: "zeta",
+            remoteCid: "alpha",
+            localJoinedAt: 1,
+            remoteJoinedAt: 2,
+            hostCid: "zeta"
+        )
+        await waitUntil {
+            !harness.fakeProvider.sentPeerMessages(ofType: "offer").isEmpty
+        }
+
+        let offerMessages = harness.fakeProvider.sentPeerMessages(ofType: "offer")
+        XCTAssertFalse(offerMessages.isEmpty, "Two-party host should send offer")
+    }
+
+    func testDeferredTwoPartyNonHostWaitsEvenWhenPeerIdSortsEarlier() async throws {
+        resetHarness(deferInitialAnswer: true)
+        await harness.advanceToInCallWithTurn(
+            localCid: "alpha",
+            remoteCid: "zeta",
+            localJoinedAt: 1,
+            remoteJoinedAt: 2,
+            hostCid: "zeta"
+        )
+
+        let offerMessages = harness.fakeProvider.sentPeerMessages(ofType: "offer")
+        XCTAssertTrue(offerMessages.isEmpty, "Two-party non-host should not send offer")
     }
 
     // MARK: - Group 7: Deterministic Offer Ownership

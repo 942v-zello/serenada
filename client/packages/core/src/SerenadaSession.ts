@@ -358,6 +358,7 @@ export class SerenadaSession implements SerenadaSessionHandle {
                 initialFacingMode: initialCameraMode === 'world' ? 'environment' : 'user',
                 initialVideoEnabled: this.userPreferredVideoEnabled,
                 videoCaptureSupported: this.availableCameraModes.length > 0,
+                deferInitialAnswer: config.deferInitialAnswer === true,
             },
             (type, payload, to) => {
                 if (to) {

@@ -200,6 +200,12 @@ export interface SerenadaConfig {
      * is always dropped on web). Defaults to `['selfie', 'world', 'composite']`.
      */
     cameraModes?: ConfigurableCameraMode[];
+    /**
+     * When `true`, defer the initial-negotiation offer-timeout/ICE-restart while the host peer
+     * awaits its first answer. Use for app-owned calls whose answer is gated on a remote action
+     * that may take longer than the offer timeout, such as PSTN pickup. Defaults to `false`.
+     */
+    deferInitialAnswer?: boolean;
     /** Signaling transport priority order. Defaults to `['ws', 'sse']`. */
     transports?: TransportKind[];
     /** When `true`, only use TURNS (TLS) relay candidates. */
