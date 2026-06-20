@@ -26,7 +26,7 @@ final class SessionNegotiationTests: XCTestCase {
     }
 
     private func waitUntil(
-        attempts: Int = 32,
+        attempts: Int = 100,
         condition: () -> Bool
     ) async {
         for _ in 0..<attempts {
@@ -34,21 +34,26 @@ final class SessionNegotiationTests: XCTestCase {
                 return
             }
             await harness.yieldToMainActor()
+            // A short real-time nap lets freshly-spawned `Task { @MainActor in ... }`
+            // work (connection-state callbacks, the deferred ICE-restart chain) drain
+            // even when the cooperative executor is busy during a full-suite run, where
+            // a fixed count of `Task.yield()`s alone was not always enough.
+            try? await Task.sleep(nanoseconds: 1_000_000)
         }
     }
 
     private func waitForIceRestartTask(
         _ fakeSlot: FakePeerConnectionSlot?,
-        attempts: Int = 32
+        attempts: Int = 100
     ) async {
         await waitUntil(attempts: attempts) {
             fakeSlot?.iceRestartTask != nil
         }
     }
 
-    private func resetHarness() {
+    private func resetHarness(deferInitialAnswer: Bool = false) {
         harness.tearDown()
-        harness = SessionTestHarness()
+        harness = SessionTestHarness(deferInitialAnswer: deferInitialAnswer)
     }
 
     private func sharedNegotiationScenarios() throws -> [SharedNegotiationScenario] {
@@ -156,6 +161,30 @@ final class SessionNegotiationTests: XCTestCase {
 
         XCTAssertEqual(fakeSlot?.setRemoteDescriptionCalls.last?.type, .answer, "Should set answer as remote desc")
         XCTAssertEqual(fakeSlot?.pendingIceRestart, false, "pendingIceRestart should be cleared after answer")
+    }
+
+    func testDeferredFirstAnswerApplyFailureRetriesIceRestart() async throws {
+        resetHarness(deferInitialAnswer: true)
+        await harness.advanceToInCallWithTurn(
+            localCid: "zulu",
+            remoteCid: "alpha",
+            localJoinedAt: 1,
+            remoteJoinedAt: 2,
+            hostCid: "zulu"
+        )
+
+        let fakeSlot = try XCTUnwrap(harness.fakeMedia.fakeSlots["alpha"])
+        let offersBefore = harness.fakeProvider.sentPeerMessages(ofType: "offer").count
+        fakeSlot.failNextRemoteAnswer = true
+
+        harness.simulateAnswerFromRemote(fromCid: "alpha", offerId: try latestOfferId())
+        await waitUntil {
+            harness.fakeProvider.sentPeerMessages(ofType: "offer").count == offersBefore + 1
+        }
+
+        XCTAssertGreaterThan(fakeSlot.rollbackCalls, 0, "Failed first answer should roll back the stale local offer")
+        XCTAssertEqual(harness.fakeProvider.sentPeerMessages(ofType: "offer").count, offersBefore + 1)
+        XCTAssertEqual(fakeSlot.createOfferIceRestartFlags.last, true, "Recovery offer should be an ICE restart")
     }
 
     // MARK: - Group 2: ICE Candidate Relay
@@ -350,7 +379,7 @@ final class SessionNegotiationTests: XCTestCase {
         XCTAssertNotNil(fakeSlot?.iceRestartTask, "ICE restart should be deferred, not dropped")
 
         await harness.fakeClock.advance(byMs: Int64(WebRtcResilience.iceRestartCooldownMs))
-        await harness.yieldToMainActor()
+        await waitUntil { (fakeSlot?.createOfferCalls ?? 0) > offersBefore }
 
         // triggerIceRestart clears the task when the deferred sleep completes;
         // an unclamped deferral would still be parked here (10x the cooldown away).
@@ -419,6 +448,37 @@ final class SessionNegotiationTests: XCTestCase {
 
         let offerMessages = harness.fakeProvider.sentPeerMessages(ofType: "offer")
         XCTAssertTrue(offerMessages.isEmpty, "Higher peer ID should not send offer")
+    }
+
+    func testDeferredTwoPartyHostOffersEvenWhenPeerIdSortsLater() async throws {
+        resetHarness(deferInitialAnswer: true)
+        await harness.advanceToInCallWithTurn(
+            localCid: "zeta",
+            remoteCid: "alpha",
+            localJoinedAt: 1,
+            remoteJoinedAt: 2,
+            hostCid: "zeta"
+        )
+        await waitUntil {
+            !harness.fakeProvider.sentPeerMessages(ofType: "offer").isEmpty
+        }
+
+        let offerMessages = harness.fakeProvider.sentPeerMessages(ofType: "offer")
+        XCTAssertFalse(offerMessages.isEmpty, "Two-party host should send offer")
+    }
+
+    func testDeferredTwoPartyNonHostWaitsEvenWhenPeerIdSortsEarlier() async throws {
+        resetHarness(deferInitialAnswer: true)
+        await harness.advanceToInCallWithTurn(
+            localCid: "alpha",
+            remoteCid: "zeta",
+            localJoinedAt: 1,
+            remoteJoinedAt: 2,
+            hostCid: "zeta"
+        )
+
+        let offerMessages = harness.fakeProvider.sentPeerMessages(ofType: "offer")
+        XCTAssertTrue(offerMessages.isEmpty, "Two-party non-host should not send offer")
     }
 
     // MARK: - Group 7: Deterministic Offer Ownership

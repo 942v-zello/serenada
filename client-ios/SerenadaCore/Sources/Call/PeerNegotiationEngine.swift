@@ -9,7 +9,7 @@ final class PeerNegotiationEngine {
 
     // State readers
     private let getClientId: () -> String?
-    private let getHostCid: () -> String?
+    private let deferInitialAnswer: () -> Bool
     private let getInternalPhase: () -> CallPhase
     private let getParticipantCount: () -> Int
     private let getCurrentRoomState: () -> RoomState?
@@ -48,6 +48,7 @@ final class PeerNegotiationEngine {
     private var currentNegotiationIds: [String: String] = [:]
     private var ignoredOfferIds: [String: String] = [:]
     private var settingRemoteAnswerCids: Set<String> = []
+    private var initialAnswerReceivedCids: Set<String> = []
     private var pendingRemoteIceByOfferId: [String: [String: [IceCandidatePayload]]] = [:]
     private var participantStatuses: [String: ParticipantSignalingStatus] = [:]
     private var outboundMediaWatchByCid: [String: OutboundMediaWatch] = [:]
@@ -63,7 +64,7 @@ final class PeerNegotiationEngine {
     init(
         clock: SessionClock,
         getClientId: @escaping () -> String?,
-        getHostCid: @escaping () -> String?,
+        deferInitialAnswer: @escaping () -> Bool = { false },
         getInternalPhase: @escaping () -> CallPhase,
         getParticipantCount: @escaping () -> Int,
         getCurrentRoomState: @escaping () -> RoomState?,
@@ -92,7 +93,7 @@ final class PeerNegotiationEngine {
     ) {
         self.clock = clock
         self.getClientId = getClientId
-        self.getHostCid = getHostCid
+        self.deferInitialAnswer = deferInitialAnswer
         self.getInternalPhase = getInternalPhase
         self.getParticipantCount = getParticipantCount
         self.getCurrentRoomState = getCurrentRoomState
@@ -130,6 +131,7 @@ final class PeerNegotiationEngine {
             clearOfferTimeout()
             clearIceRestartTimer()
             participantStatuses.removeAll()
+            initialAnswerReceivedCids.removeAll()
         }
 
         if remoteParticipants.count >= 1 {
@@ -249,6 +251,7 @@ final class PeerNegotiationEngine {
         participantStatuses.removeAll()
         outboundMediaWatchByCid.removeAll()
         lastMediaRestartHandledAtByCid.removeAll()
+        initialAnswerReceivedCids.removeAll()
     }
 
     func recoverStalledOutboundMedia() {
@@ -369,6 +372,7 @@ final class PeerNegotiationEngine {
         clearOfferTimeout(remoteCid: remoteCid)
         clearIceRestartTimer(remoteCid: remoteCid)
         clearNegotiationState(remoteCid: remoteCid)
+        initialAnswerReceivedCids.remove(remoteCid)
         participantStatuses.removeValue(forKey: remoteCid)
         outboundMediaWatchByCid.removeValue(forKey: remoteCid)
         lastMediaRestartHandledAtByCid.removeValue(forKey: remoteCid)
@@ -559,6 +563,7 @@ final class PeerNegotiationEngine {
                 self.settingRemoteAnswerCids.remove(remoteCid)
                 guard let slot else { return }
                 if success {
+                    self.initialAnswerReceivedCids.insert(remoteCid)
                     // The offer this answer completes is whatever was pending when we validated
                     // it above; `pendingOfferId` also covers the legacy/no-offerId path, where
                     // `offerId` is the sentinel rather than our real local id.
@@ -579,7 +584,12 @@ final class PeerNegotiationEngine {
                     self.updateAggregatePeerState()
                     self.onConnectionStatusUpdate()
                 } else if self.shouldIOffer(remoteCid: remoteCid) {
-                    self.scheduleIceRestart(remoteCid: remoteCid, reason: "answer-apply-failed", delayMs: 0)
+                    self.scheduleIceRestart(
+                        remoteCid: remoteCid,
+                        reason: "answer-apply-failed",
+                        delayMs: 0,
+                        allowBeforeFirstAnswer: true
+                    )
                 }
             }
         }
@@ -630,11 +640,26 @@ final class PeerNegotiationEngine {
 
     // MARK: - Offer Logic
 
+    /// True while this peer is the deferred-answer offerer awaiting its first answer from `remoteCid`.
+    /// Gates the initial offer-timeout/ICE-restart/media-restart suppression; renegotiations after
+    /// the first answer behave normally.
+    private func isDeferringInitialNegotiation(_ remoteCid: String) -> Bool {
+        deferInitialAnswer() && shouldIOffer(remoteCid: remoteCid) && !initialAnswerReceivedCids.contains(remoteCid)
+    }
+
     private func shouldIOffer(remoteCid: String, roomState: RoomState? = nil) -> Bool {
         guard let myCid = getClientId() else { return false }
-        if let roomState,
-           !roomState.participants.contains(where: { $0.cid == remoteCid }) {
+        let activeRoomState = roomState ?? getCurrentRoomState()
+        if let activeRoomState,
+           !activeRoomState.participants.contains(where: { $0.cid == remoteCid }) {
             return false
+        }
+        if deferInitialAnswer(), let activeRoomState {
+            let participantCids = Set(activeRoomState.participants.map(\.cid))
+            let hostCid = participantCids.contains(activeRoomState.hostCid) ? activeRoomState.hostCid : nil
+            if participantCids.count <= 2, let hostCid {
+                return myCid == hostCid
+            }
         }
         return myCid < remoteCid
     }
@@ -744,6 +769,10 @@ final class PeerNegotiationEngine {
     private func handleMediaRestartRequest(slot: any PeerConnectionSlotProtocol, remoteCid: String, reason: String) {
         if reason == SignalingProtocolConstants.mediaRestartReasonLocalTrackNegotiation {
             handleLocalTrackNegotiationRequest(slot: slot, remoteCid: remoteCid)
+            return
+        }
+        if isDeferringInitialNegotiation(remoteCid) {
+            logger?.log(.debug, tag: "PeerNegotiationEngine", "Ignoring media restart for \(remoteCid) before first answer")
             return
         }
         guard canOffer(slot: slot) else { return }
@@ -885,6 +914,10 @@ final class PeerNegotiationEngine {
     ) {
         clearOfferTimeout(remoteCid: remoteCid)
         guard let slot = getSlot(remoteCid) else { return }
+        if isDeferringInitialNegotiation(remoteCid) {
+            logger?.log(.debug, tag: "PeerNegotiationEngine", "Deferring initial offer timeout for \(remoteCid)")
+            return
+        }
 
         slot.setOfferTimeoutTask(Task { [weak self] in
             guard let clock = self?.clock else { return }
@@ -930,8 +963,16 @@ final class PeerNegotiationEngine {
 
     // MARK: - ICE Restart
 
-    func scheduleIceRestart(remoteCid: String, reason: String, delayMs: Int) {
+    func scheduleIceRestart(
+        remoteCid: String,
+        reason: String,
+        delayMs: Int,
+        allowBeforeFirstAnswer: Bool = false
+    ) {
         guard let slot = getSlot(remoteCid) else { return }
+        if !allowBeforeFirstAnswer && isDeferringInitialNegotiation(remoteCid) {
+            return
+        }
         if !canOffer(slot: slot) {
             slot.markPendingIceRestart()
             return
@@ -957,7 +998,11 @@ final class PeerNegotiationEngine {
             }
             guard !Task.isCancelled else { return }
             await MainActor.run {
-                self?.triggerIceRestart(remoteCid: remoteCid, reason: reason)
+                self?.triggerIceRestart(
+                    remoteCid: remoteCid,
+                    reason: reason,
+                    allowBeforeFirstAnswer: allowBeforeFirstAnswer
+                )
             }
         })
     }
@@ -973,9 +1018,17 @@ final class PeerNegotiationEngine {
         }
     }
 
-    private func triggerIceRestart(remoteCid: String, reason: String) {
+    private func triggerIceRestart(
+        remoteCid: String,
+        reason: String,
+        allowBeforeFirstAnswer: Bool = false
+    ) {
         guard let slot = getSlot(remoteCid) else { return }
         slot.cancelIceRestartTask()
+        if !allowBeforeFirstAnswer && isDeferringInitialNegotiation(remoteCid) {
+            logger?.log(.debug, tag: "PeerNegotiationEngine", "Suppressing ICE restart for \(remoteCid) before first answer (\(reason))")
+            return
+        }
 
         guard canOffer(slot: slot) else {
             slot.markPendingIceRestart()
@@ -992,7 +1045,12 @@ final class PeerNegotiationEngine {
             slot.markPendingIceRestart()
             if signalingState == "HAVE_LOCAL_OFFER" {
                 pendingLocalOfferIds.removeValue(forKey: remoteCid)
-                rollbackStaleLocalOfferAndRetryIceRestart(slot: slot, remoteCid: remoteCid, reason: reason)
+                rollbackStaleLocalOfferAndRetryIceRestart(
+                    slot: slot,
+                    remoteCid: remoteCid,
+                    reason: reason,
+                    allowBeforeFirstAnswer: allowBeforeFirstAnswer
+                )
             }
             return
         }
@@ -1004,7 +1062,8 @@ final class PeerNegotiationEngine {
     private func rollbackStaleLocalOfferAndRetryIceRestart(
         slot: any PeerConnectionSlotProtocol,
         remoteCid: String,
-        reason: String
+        reason: String,
+        allowBeforeFirstAnswer: Bool = false
     ) {
         slot.rollbackLocalDescription { [weak self] success in
             Task { @MainActor in
@@ -1012,10 +1071,14 @@ final class PeerNegotiationEngine {
                 if success {
                     guard let currentSlot = self.getSlot(remoteCid),
                           currentSlot.getSignalingState() == "STABLE",
-                          currentSlot.pendingIceRestart else {
+                          currentSlot.pendingIceRestart || allowBeforeFirstAnswer else {
                         return
                     }
-                    self.triggerIceRestart(remoteCid: remoteCid, reason: "\(reason)-rollback")
+                    self.triggerIceRestart(
+                        remoteCid: remoteCid,
+                        reason: "\(reason)-rollback",
+                        allowBeforeFirstAnswer: allowBeforeFirstAnswer
+                    )
                 } else {
                     self.scheduleOfferTimeout(remoteCid: remoteCid)
                 }

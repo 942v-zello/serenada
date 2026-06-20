@@ -53,9 +53,9 @@ class SessionNegotiationTest {
         }
     }
 
-    private fun resetFactory() {
+    private fun resetFactory(deferInitialAnswer: Boolean = false) {
         factory.tearDown()
-        factory = TestSessionFactory()
+        factory = TestSessionFactory(deferInitialAnswer = deferInitialAnswer)
     }
 
     private fun latestOfferId(): String {
@@ -193,6 +193,31 @@ class SessionNegotiationTest {
 
         assertEquals(org.webrtc.SessionDescription.Type.ANSWER, fakeSlot.setRemoteDescriptionCalls.last().first)
         assertFalse("pendingIceRestart should be cleared", fakeSlot.pendingIceRestart)
+    }
+
+    @Test
+    fun `deferred first answer apply failure retries ICE restart`() {
+        resetFactory(deferInitialAnswer = true)
+        factory.advanceToInCallWithTurn(
+            localCid = "zulu",
+            remoteCid = "alpha",
+            localJoinedAt = 1,
+            remoteJoinedAt = 2,
+            hostCid = "zulu",
+        )
+
+        val fakeSlot = factory.fakeMedia.fakeSlots["alpha"]
+        assertNotNull(fakeSlot)
+        val offersBefore = factory.fakeProvider.sentMessages("offer").size
+        fakeSlot!!.failNextRemoteAnswer = true
+
+        factory.simulateAnswerFromRemote("alpha", offerId = latestOfferId())
+        ShadowLooper.idleMainLooper()
+        ShadowLooper.idleMainLooper(100, TimeUnit.MILLISECONDS)
+
+        assertTrue("Failed first answer should roll back the stale local offer", fakeSlot.rollbackCalls > 0)
+        assertEquals("Failed first answer should send a recovery offer", offersBefore + 1, factory.fakeProvider.sentMessages("offer").size)
+        assertEquals("Recovery offer should be an ICE restart", true, fakeSlot.createOfferIceRestartFlags.last())
     }
 
     // Group 2: ICE Candidate Relay
@@ -362,6 +387,32 @@ class SessionNegotiationTest {
     fun `lexicographically higher peer ID does not send offer`() {
         factory.advanceToInCallWithTurn(localCid = "zulu", remoteCid = "alpha", localJoinedAt = 1, remoteJoinedAt = 2)
         assertTrue("Higher peer ID should not offer", factory.fakeProvider.sentMessages("offer").isEmpty())
+    }
+
+    @Test
+    fun `two party host sends offer even when peer ID sorts later`() {
+        resetFactory(deferInitialAnswer = true)
+        factory.advanceToInCallWithTurn(
+            localCid = "zulu",
+            remoteCid = "alpha",
+            localJoinedAt = 1,
+            remoteJoinedAt = 2,
+            hostCid = "zulu",
+        )
+        assertTrue("Two-party host should offer", factory.fakeProvider.sentMessages("offer").isNotEmpty())
+    }
+
+    @Test
+    fun `two party non-host does not offer even when peer ID sorts earlier`() {
+        resetFactory(deferInitialAnswer = true)
+        factory.advanceToInCallWithTurn(
+            localCid = "alpha",
+            remoteCid = "zulu",
+            localJoinedAt = 1,
+            remoteJoinedAt = 2,
+            hostCid = "zulu",
+        )
+        assertTrue("Two-party non-host should not offer", factory.fakeProvider.sentMessages("offer").isEmpty())
     }
 
     @Test

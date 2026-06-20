@@ -34,6 +34,10 @@ public struct SerenadaConfig: Equatable, @unchecked Sendable {
     /// devices without multi-cam). `.screenShare` is always ignored — screen
     /// sharing is controlled separately. Defaults to `[.selfie, .world, .composite]`.
     public var cameraModes: [LocalCameraMode]?
+    /// When `true`, defer the initial-negotiation offer-timeout/ICE-restart while the host peer
+    /// awaits its first answer. Use for app-owned calls whose answer is gated on a remote action
+    /// that may take longer than the offer timeout, such as PSTN pickup. Defaults to `false`.
+    public var deferInitialAnswer: Bool
     /// Preferred signaling transports in priority order. Defaults to `[.ws, .sse]`.
     public var transports: [SerenadaTransport]
     /// Whether the proximity sensor is used to switch audio to the earpiece and pause video.
@@ -50,6 +54,7 @@ public struct SerenadaConfig: Equatable, @unchecked Sendable {
         defaultAudioEnabled: Bool = true,
         defaultVideoEnabled: Bool = true,
         cameraModes: [LocalCameraMode]? = nil,
+        deferInitialAnswer: Bool = false,
         transports: [SerenadaTransport] = [.ws, .sse],
         proximityMonitoringEnabled: Bool = false,
         audioCoordinator: SerenadaAudioCoordinator? = nil,
@@ -60,6 +65,7 @@ public struct SerenadaConfig: Equatable, @unchecked Sendable {
         self.defaultAudioEnabled = defaultAudioEnabled
         self.defaultVideoEnabled = defaultVideoEnabled
         self.cameraModes = cameraModes
+        self.deferInitialAnswer = deferInitialAnswer
         self.transports = transports
         self.proximityMonitoringEnabled = proximityMonitoringEnabled
         self.audioCoordinator = audioCoordinator
@@ -71,6 +77,7 @@ public struct SerenadaConfig: Equatable, @unchecked Sendable {
             && lhs.defaultAudioEnabled == rhs.defaultAudioEnabled
             && lhs.defaultVideoEnabled == rhs.defaultVideoEnabled
             && lhs.cameraModes == rhs.cameraModes
+            && lhs.deferInitialAnswer == rhs.deferInitialAnswer
             && lhs.transports == rhs.transports
             && lhs.proximityMonitoringEnabled == rhs.proximityMonitoringEnabled
             && haveSameProvider(lhs.signalingProvider, rhs.signalingProvider)

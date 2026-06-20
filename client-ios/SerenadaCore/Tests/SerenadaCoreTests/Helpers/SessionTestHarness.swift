@@ -14,11 +14,15 @@ final class SessionTestHarness {
     init(
         roomId: String = "test-room-id",
         handlesReconnection: Bool = false,
+        deferInitialAnswer: Bool = false,
         config: SerenadaConfig? = nil,
         delegate: SerenadaCoreDelegate? = nil
     ) {
         self.fakeProvider = FakeSignalingProvider(handlesReconnection: handlesReconnection)
         var resolvedConfig = config ?? SerenadaConfig(signalingProvider: fakeProvider)
+        if deferInitialAnswer {
+            resolvedConfig.deferInitialAnswer = true
+        }
         self.fakeAPI = FakeAPIClient()
         self.fakeAudio = FakeAudioController()
         self.fakeAudioCoordinator = FakeAudioCoordinator()
@@ -147,6 +151,7 @@ final class SessionTestHarness {
         remoteCid: String = "remote-cid-1",
         localJoinedAt: Int = 1,
         remoteJoinedAt: Int = 2,
+        hostCid: String? = nil,
         iceServers: [IceServerConfig] = [IceServerConfig(urls: ["turn:turn.example.com:3478"], username: "user", credential: "pass")]
     ) async {
         fakeProvider.iceServerResults = [.success(iceServers)]
@@ -159,7 +164,7 @@ final class SessionTestHarness {
                 (cid: localCid, joinedAt: localJoinedAt),
                 (cid: remoteCid, joinedAt: remoteJoinedAt)
             ],
-            hostCid: localCid
+            hostCid: hostCid ?? localCid
         )
         await yieldToMainActor()
         await fakeClock.advance(byMs: 100)

@@ -17,7 +17,10 @@ internal class PeerNegotiationEngine(
     private val clock: SessionClock,
     // State readers
     private val getClientId: () -> String?,
-    private val getHostCid: () -> String?,
+    // When true, the initial-negotiation offer-timeout is deferred while the host peer awaits
+    // its FIRST answer (e.g. PSTN, where the answer is gated on human pickup and can take far
+    // longer than OFFER_TIMEOUT_MS). Normal offer-timeout resumes after the first answer.
+    private val deferInitialAnswer: () -> Boolean = { false },
     private val getParticipantCount: () -> Int,
     private val getCurrentRoomState: () -> RoomState?,
     private val isSignalingConnected: () -> Boolean,
@@ -80,6 +83,9 @@ internal class PeerNegotiationEngine(
     private val currentNegotiationIds = mutableMapOf<String, String>()
     private val ignoredOfferIds = mutableMapOf<String, String>()
     private val settingRemoteAnswerCids = mutableSetOf<String>()
+    // Remote cids whose FIRST answer has been applied. Gates deferInitialAnswer so only the
+    // initial negotiation is deferred; renegotiations after the first answer time out normally.
+    private val initialAnswerReceivedCids = mutableSetOf<String>()
     private val pendingRemoteIceByOfferId = mutableMapOf<String, MutableMap<String, MutableList<IceCandidate>>>()
     private val participantStatuses = mutableMapOf<String, ParticipantSignalingStatus>()
     private val outboundMediaWatchByCid = mutableMapOf<String, OutboundMediaWatch>()
@@ -199,6 +205,7 @@ internal class PeerNegotiationEngine(
         participantStatuses.clear()
         outboundMediaWatchByCid.clear()
         lastMediaRestartHandledAtByCid.clear()
+        initialAnswerReceivedCids.clear()
     }
 
     fun recoverStalledOutboundMedia() {
@@ -302,6 +309,10 @@ internal class PeerNegotiationEngine(
         clearOfferTimeout(remoteCid)
         clearIceRestartTimer(remoteCid)
         clearNegotiationState(remoteCid)
+        // Cleared only on true departure (not the mid-call replace* paths that also call
+        // clearNegotiationState), so a peer that leaves and rejoins gets a fresh first-answer
+        // deferral, while an in-call renegotiation keeps its "answered" state.
+        initialAnswerReceivedCids.remove(remoteCid)
         participantStatuses.remove(remoteCid)
         outboundMediaWatchByCid.remove(remoteCid)
         lastMediaRestartHandledAtByCid.remove(remoteCid)
@@ -496,6 +507,7 @@ internal class PeerNegotiationEngine(
             handler.post {
                 settingRemoteAnswerCids.remove(remoteCid)
                 if (success) {
+                    initialAnswerReceivedCids.add(remoteCid)
                     // The offer this answer completes is whatever was pending when we validated
                     // it above; `pendingOfferId` also covers the legacy/no-offerId path, where
                     // `offerId` is the sentinel rather than our real local id.
@@ -517,7 +529,7 @@ internal class PeerNegotiationEngine(
                     updateAggregatePeerState()
                     onConnectionStatusUpdate()
                 } else if (shouldIOffer(remoteCid)) {
-                    scheduleIceRestart(remoteCid, "answer-apply-failed", 0)
+                    scheduleIceRestart(remoteCid, "answer-apply-failed", 0, allowBeforeFirstAnswer = true)
                 } else {
                     logger?.log(SerenadaLogLevel.WARNING, TAG, "Failed to apply answer from $remoteCid")
                 }
@@ -558,9 +570,28 @@ internal class PeerNegotiationEngine(
 
     // --- Offer Logic ---
 
+    /**
+     * True while this peer is the deferred-answer offerer awaiting its first answer from [remoteCid].
+     * Gates the initial offer-timeout/ICE-restart/media-restart suppression; renegotiations after
+     * the first answer behave normally.
+     */
+    private fun isDeferringInitialNegotiation(remoteCid: String): Boolean =
+        deferInitialAnswer() && shouldIOffer(remoteCid) && remoteCid !in initialAnswerReceivedCids
+
     private fun shouldIOffer(remoteCid: String, roomState: RoomState? = getCurrentRoomState()): Boolean {
         val myCid = getClientId() ?: return false
         roomState ?: return false
+        // Host-based offerer election is scoped to deferred-answer (PSTN) calls only. Every other
+        // call keeps the historical lexicographic rule, so behavior is byte-identical to older
+        // SDKs (e.g. 0.8.5) and mixed-version 1:1/group calls can never disagree on the offerer.
+        // (For PSTN the app forces itself host via hostPeerId, so this elects the app.)
+        if (deferInitialAnswer()) {
+            val participantCids = roomState.participants.map { it.cid }.toSet()
+            val hostCid = roomState.hostCid.takeIf { it in participantCids }
+            if (participantCids.size <= 2 && hostCid != null) {
+                return myCid == hostCid
+            }
+        }
         return myCid < remoteCid
     }
 
@@ -640,6 +671,13 @@ internal class PeerNegotiationEngine(
     private fun handleMediaRestartRequest(slot: PeerConnectionSlotProtocol, remoteCid: String, reason: String) {
         if (reason == SignalingProtocolConstants.MEDIA_RESTART_REASON_LOCAL_TRACK_NEGOTIATION) {
             handleLocalTrackNegotiationRequest(slot, remoteCid)
+            return
+        }
+        if (isDeferringInitialNegotiation(remoteCid)) {
+            // Don't recreate the peer and re-offer before the first answer on a deferred call; a
+            // (possibly out-of-order or bridge-sent) media-restart here would replace the in-flight
+            // initial offer the bridge will answer at pickup. Resumes after the first answer.
+            logger?.log(SerenadaLogLevel.DEBUG, TAG, "Ignoring media-restart for $remoteCid before first answer")
             return
         }
         if (!canOffer(slot)) return
@@ -772,6 +810,15 @@ internal class PeerNegotiationEngine(
     private fun scheduleOfferTimeout(remoteCid: String) {
         val slot = getSlot(remoteCid) ?: return
         clearOfferTimeout(remoteCid)
+        if (isDeferringInitialNegotiation(remoteCid)) {
+            // Deferred-answer call (e.g. PSTN): the first answer may arrive long after
+            // OFFER_TIMEOUT_MS (human pickup). Don't arm the re-offer/ICE-restart timer for the
+            // initial negotiation; otherwise we'd roll back and re-offer while merely waiting for
+            // the far end to answer, and the bridge would discard the re-offer. Normal timeout
+            // resumes for renegotiations once the first answer has been applied.
+            logger?.log(SerenadaLogLevel.DEBUG, TAG, "Deferring initial offer-timeout for $remoteCid (awaiting first answer)")
+            return
+        }
         val runnable = Runnable {
             slot.cancelOfferTimeout()
             if (slot.getSignalingState() == PeerConnection.SignalingState.HAVE_LOCAL_OFFER) {
@@ -798,8 +845,18 @@ internal class PeerNegotiationEngine(
         }
     }
 
-    fun scheduleIceRestart(remoteCid: String, reason: String, delayMs: Long) {
+    fun scheduleIceRestart(
+        remoteCid: String,
+        reason: String,
+        delayMs: Long,
+        allowBeforeFirstAnswer: Boolean = false,
+    ) {
         val slot = getSlot(remoteCid) ?: return
+        if (!allowBeforeFirstAnswer && isDeferringInitialNegotiation(remoteCid)) {
+            // See triggerIceRestart: no re-offers/ICE-restarts before the first answer on a
+            // deferred-answer call. Don't even schedule one.
+            return
+        }
         if (!canOffer(slot)) { slot.markPendingIceRestart(); return }
         if (slot.iceRestartTask != null) return
         // Inside the cooldown window, defer to its expiry instead of dropping:
@@ -813,7 +870,7 @@ internal class PeerNegotiationEngine(
         } else {
             0L
         }
-        val runnable = Runnable { slot.cancelIceRestartTask(); triggerIceRestart(remoteCid, reason) }
+        val runnable = Runnable { slot.cancelIceRestartTask(); triggerIceRestart(remoteCid, reason, allowBeforeFirstAnswer) }
         slot.setIceRestartTask(runnable)
         handler.postDelayed(runnable, maxOf(delayMs, cooldownRemainingMs))
     }
@@ -826,8 +883,20 @@ internal class PeerNegotiationEngine(
         }
     }
 
-    private fun triggerIceRestart(remoteCid: String, reason: String) {
+    private fun triggerIceRestart(
+        remoteCid: String,
+        reason: String,
+        allowBeforeFirstAnswer: Boolean = false,
+    ) {
         val slot = getSlot(remoteCid) ?: return
+        if (!allowBeforeFirstAnswer && isDeferringInitialNegotiation(remoteCid)) {
+            // Deferred-answer call awaiting its first answer (e.g. PSTN ringing): suppress the
+            // re-offer/ICE-restart. Rolling back HAVE_LOCAL_OFFER and re-offering now (e.g. on a
+            // signaling reconnect) would invalidate the in-flight initial offer the bridge will
+            // answer at pickup, and the bridge ignores re-offers. Resumes after the first answer.
+            logger?.log(SerenadaLogLevel.DEBUG, TAG, "Suppressing ICE restart for $remoteCid before first answer ($reason)")
+            return
+        }
         if (!canOffer(slot)) { slot.markPendingIceRestart(); return }
         if (slot.isMakingOffer) { slot.markPendingIceRestart(); return }
         val signalingState = slot.getSignalingState()
@@ -835,7 +904,7 @@ internal class PeerNegotiationEngine(
             slot.markPendingIceRestart()
             if (signalingState == PeerConnection.SignalingState.HAVE_LOCAL_OFFER) {
                 pendingLocalOfferIds.remove(remoteCid)
-                rollbackStaleLocalOfferAndRetryIceRestart(slot, remoteCid, reason)
+                rollbackStaleLocalOfferAndRetryIceRestart(slot, remoteCid, reason, allowBeforeFirstAnswer)
             }
             return
         }
@@ -848,13 +917,17 @@ internal class PeerNegotiationEngine(
         slot: PeerConnectionSlotProtocol,
         remoteCid: String,
         reason: String,
+        allowBeforeFirstAnswer: Boolean = false,
     ) {
         slot.rollbackLocalDescription { success ->
             handler.post {
                 if (success) {
                     val currentSlot = getSlot(remoteCid) ?: return@post
-                    if (currentSlot.getSignalingState() == PeerConnection.SignalingState.STABLE && currentSlot.pendingIceRestart) {
-                        triggerIceRestart(remoteCid, "$reason-rollback")
+                    if (
+                        currentSlot.getSignalingState() == PeerConnection.SignalingState.STABLE &&
+                        (currentSlot.pendingIceRestart || allowBeforeFirstAnswer)
+                    ) {
+                        triggerIceRestart(remoteCid, "$reason-rollback", allowBeforeFirstAnswer)
                     }
                 } else {
                     scheduleOfferTimeout(remoteCid)

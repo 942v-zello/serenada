@@ -47,6 +47,7 @@ internal class FakePeerConnectionSlot(
     var closePeerConnectionDeferredDispose = false; private set
     var ensurePeerConnectionCalls = 0; private set
     var failNextRemoteOffer = false
+    var failNextRemoteAnswer = false
     var failNextAnswer = false
     var failNextRollback = false
     var deferNextOfferSdp = false
@@ -143,6 +144,11 @@ internal class FakePeerConnectionSlot(
         setRemoteDescriptionCalls.add(type to sdp)
         if (type == SessionDescription.Type.OFFER && failNextRemoteOffer) {
             failNextRemoteOffer = false
+            onComplete?.invoke(false)
+            return
+        }
+        if (type == SessionDescription.Type.ANSWER && failNextRemoteAnswer) {
+            failNextRemoteAnswer = false
             onComplete?.invoke(false)
             return
         }

@@ -305,6 +305,7 @@ public final class SerenadaSession: ObservableObject {
                 defaultAudioEnabled: config.defaultAudioEnabled,
                 defaultVideoEnabled: config.defaultVideoEnabled,
                 cameraModes: config.cameraModes,
+                deferInitialAnswer: config.deferInitialAnswer,
                 transports: config.transports,
                 proximityMonitoringEnabled: config.proximityMonitoringEnabled,
                 audioCoordinator: config.audioCoordinator,
@@ -1974,7 +1975,7 @@ public final class SerenadaSession: ObservableObject {
         peerNegotiationEngine = PeerNegotiationEngine(
             clock: clock,
             getClientId: { [weak self] in self?.clientId },
-            getHostCid: { [weak self] in self?.hostCid },
+            deferInitialAnswer: { [weak self] in self?.config.deferInitialAnswer ?? false },
             getInternalPhase: { [weak self] in self?.internalPhase ?? .idle },
             getParticipantCount: { [weak self] in self?.participantCount ?? 0 },
             getCurrentRoomState: { [weak self] in self?.currentRoomState },
