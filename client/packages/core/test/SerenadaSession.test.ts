@@ -1474,6 +1474,48 @@ describe('SerenadaSession', () => {
             expect(harness.state.localParticipant?.videoEnabled).toBe(true);
         });
 
+        it('allows screen share when camera modes are empty', async () => {
+            harness = new TestSessionHarness({
+                config: { cameraModes: [] },
+            });
+            harness.media.startLocalMediaResult = createMediaStream({ audio: true });
+            harness.simulateJoined({
+                clientId: 'me',
+                participants: [{ cid: 'me' }, { cid: 'peer-1' }],
+            });
+            await vi.advanceTimersByTimeAsync(0);
+            harness.media.startScreenShare = vi.fn(async () => {
+                harness.media.isScreenSharing = true;
+                harness.media.localStream = createMediaStream({ audio: true, video: true });
+            });
+
+            await harness.session.startScreenShare();
+
+            expect(harness.state.localParticipant?.availableCameraModes).toEqual([]);
+            expect(harness.media.startScreenShare).toHaveBeenCalledTimes(1);
+            expect(harness.state.localParticipant?.videoEnabled).toBe(true);
+        });
+
+        it('blocks screen share in strict audio-only mode', async () => {
+            harness = new TestSessionHarness({
+                config: { videoMediaEnabled: false },
+            });
+            harness.media.startLocalMediaResult = createMediaStream({ audio: true });
+            harness.simulateJoined({
+                clientId: 'me',
+                participants: [{ cid: 'me' }, { cid: 'peer-1' }],
+            });
+            await vi.advanceTimersByTimeAsync(0);
+            harness.media.startScreenShare = vi.fn(async () => {
+                harness.media.isScreenSharing = true;
+            });
+
+            await harness.session.startScreenShare();
+
+            expect(harness.state.localParticipant?.availableCameraModes).toEqual([]);
+            expect(harness.media.startScreenShare).not.toHaveBeenCalled();
+        });
+
         it('does not rebroadcast local media state when screen share start is a no-op', async () => {
             harness = new TestSessionHarness();
             harness.media.startLocalMediaResult = createMediaStream({ audio: true });

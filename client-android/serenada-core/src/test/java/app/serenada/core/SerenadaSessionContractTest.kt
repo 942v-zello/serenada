@@ -10,6 +10,7 @@ import app.serenada.core.call.AudioDeviceStatus
 import app.serenada.core.call.AudioIntent
 import app.serenada.core.call.SerenadaAudioCoordinator
 import app.serenada.core.call.WebRtcResilienceConstants
+import android.content.Intent
 import android.os.Looper
 import app.serenada.core.fakes.TestSessionFactory
 import kotlinx.coroutines.CompletableDeferred
@@ -85,6 +86,41 @@ class SerenadaSessionContractTest {
 
         assertEquals(false, factory.fakeMedia.startVideoCaptureCalls.single())
         assertFalse(factory.session.state.value.localVideoEnabled)
+    }
+
+    @Test
+    fun `strict audio only starts without camera and blocks screen share`() {
+        factory.tearDown()
+        factory = TestSessionFactory(videoMediaEnabled = false)
+        Shadows.shadowOf(RuntimeEnvironment.getApplication())
+            .grantPermissions(android.Manifest.permission.RECORD_AUDIO)
+
+        factory.startSession()
+        ShadowLooper.idleMainLooper()
+        factory.session.startScreenShare(Intent())
+        ShadowLooper.idleMainLooper()
+
+        assertEquals(false, factory.fakeMedia.startVideoCaptureCalls.single())
+        assertFalse(factory.session.state.value.localVideoEnabled)
+        assertTrue(factory.session.state.value.availableCameraModes.isEmpty())
+        assertEquals(0, factory.fakeMedia.startScreenShareCalls)
+    }
+
+    @Test
+    fun `empty camera modes can still request screen share`() {
+        factory.tearDown()
+        factory = TestSessionFactory(cameraModes = emptyList())
+        Shadows.shadowOf(RuntimeEnvironment.getApplication())
+            .grantPermissions(android.Manifest.permission.RECORD_AUDIO)
+
+        factory.startSession()
+        ShadowLooper.idleMainLooper()
+        factory.session.startScreenShare(Intent())
+        ShadowLooper.idleMainLooper()
+
+        assertEquals(false, factory.fakeMedia.startVideoCaptureCalls.single())
+        assertTrue(factory.session.state.value.availableCameraModes.isEmpty())
+        assertEquals(1, factory.fakeMedia.startScreenShareCalls)
     }
 
     @Test

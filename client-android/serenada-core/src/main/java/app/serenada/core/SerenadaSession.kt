@@ -478,8 +478,9 @@ class SerenadaSession internal constructor(
     private var outboundMediaWatchdogRunnable: Runnable? = null
     private var iceFetchGeneration = 0
     private var cpuWakeLock: PowerManager.WakeLock? = null
+    private val videoMediaEnabled: Boolean = config.videoMediaEnabled
     private val availableCameraModes: List<LocalCameraMode> = resolveAvailableCameraModes()
-    private val videoCaptureSupported: Boolean = availableCameraModes.isNotEmpty()
+    private val videoCaptureSupported: Boolean = videoMediaEnabled && availableCameraModes.isNotEmpty()
     private var userPreferredVideoEnabled = videoCaptureSupported && config.defaultVideoEnabled
     private var isVideoPausedByProximity = false
     private val isMediaEngineInjected = mediaEngine != null
@@ -494,6 +495,7 @@ class SerenadaSession internal constructor(
     private var localMediaReadyForNegotiation = false
 
     private fun resolveAvailableCameraModes(): List<LocalCameraMode> {
+        if (!config.videoMediaEnabled) return emptyList()
         val configuredModes = resolveCameraModes(config.cameraModes)
         if (LocalCameraMode.COMPOSITE !in configuredModes) return configuredModes
         val compositeAvailable = CameraCaptureController.isCompositeCameraModeAvailable(appContext, logger)
@@ -900,6 +902,7 @@ class SerenadaSession internal constructor(
     /** Start screen sharing using the given media projection intent. */
     fun startScreenShare(intent: Intent) {
         assertMainThread()
+        if (!videoMediaEnabled) return
         if (_diagnostics.value.isScreenSharing) return
         val wasVideoPreferred = userPreferredVideoEnabled
         userPreferredVideoEnabled = true
@@ -1281,6 +1284,7 @@ class SerenadaSession internal constructor(
                 }
             },
             isHdVideoExperimentalEnabled = config.isHdVideoExperimentalEnabled,
+            videoMediaEnabled = videoMediaEnabled,
             availableCameraModes = availableCameraModes,
             logger = logger,
         )
@@ -1865,7 +1869,7 @@ class SerenadaSession internal constructor(
         clientId = null; hostCid = null; currentRoomState = null; callStartTimeMs = null
         pendingJoinRoom = null; pendingMessages.clear(); remoteMediaStates.clear()
         connectionStatusTracker.cancelTimer()
-        userPreferredVideoEnabled = config.defaultVideoEnabled; isVideoPausedByProximity = false
+        userPreferredVideoEnabled = videoCaptureSupported && config.defaultVideoEnabled; isVideoPausedByProximity = false
         reconnectToken = null; reconnectTokenTTLMs = null; reconnectRecoveryPending = false; hasInitialIceServers = false
         cancelPostReconnectResync()
         clearAllRemoteSuspensionTracking()

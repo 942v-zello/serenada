@@ -102,6 +102,7 @@ internal enum SessionDescriptionType {
 @MainActor
 internal final class WebRtcEngine: SessionMediaEngine {
     private let logger: SerenadaLogger?
+    private let videoMediaEnabled: Bool
 
     private let cameraController: CameraCaptureController
     private var screenShareController: ScreenShareController!
@@ -137,9 +138,11 @@ internal final class WebRtcEngine: SessionMediaEngine {
         onFeatureDegradation: @escaping (FeatureDegradationState) -> Void = { _ in },
         logger: SerenadaLogger? = nil,
         isHdVideoExperimentalEnabled: Bool,
+        videoMediaEnabled: Bool = true,
         availableCameraModes: [LocalCameraMode] = defaultCameraModes
     ) {
         self.logger = logger
+        self.videoMediaEnabled = videoMediaEnabled
 
 #if canImport(WebRTC)
         self.cameraController = CameraCaptureController(
@@ -249,17 +252,22 @@ internal final class WebRtcEngine: SessionMediaEngine {
         localAudioSource = factory.audioSource(with: RTCMediaConstraints(mandatoryConstraints: nil, optionalConstraints: nil))
         localAudioTrack = factory.audioTrack(with: localAudioSource!, trackId: "ARDAMSa0")
 
-        localVideoSource = factory.videoSource()
-        localVideoTrack = factory.videoTrack(with: localVideoSource!, trackId: "ARDAMSv0")
+        if videoMediaEnabled {
+            localVideoSource = factory.videoSource()
+            localVideoTrack = factory.videoTrack(with: localVideoSource!, trackId: "ARDAMSv0")
 
-        cameraController.updateLocalVideoSource(localVideoSource)
+            cameraController.updateLocalVideoSource(localVideoSource)
 
-        let videoCaptureSupported = !cameraController.availableCameraModes.isEmpty
-        if preferVideo && videoCaptureSupported {
-            let started = cameraController.restartVideoCapturerFromAvailableModes()
-            localVideoTrack?.isEnabled = started
+            let videoCaptureSupported = !cameraController.availableCameraModes.isEmpty
+            if preferVideo && videoCaptureSupported {
+                let started = cameraController.restartVideoCapturerFromAvailableModes()
+                localVideoTrack?.isEnabled = started
+            } else {
+                localVideoTrack?.isEnabled = false
+                cameraController.notifyCameraModeAndFlash()
+            }
         } else {
-            localVideoTrack?.isEnabled = false
+            cameraController.updateLocalVideoSource(nil)
             cameraController.notifyCameraModeAndFlash()
         }
 
@@ -344,6 +352,7 @@ internal final class WebRtcEngine: SessionMediaEngine {
             iceServers: iceServers,
             localAudioTrack: localAudioTrack,
             localVideoTrack: localVideoTrack,
+            videoReceiveEnabled: videoMediaEnabled,
             onLocalIceCandidate: onLocalIceCandidate,
             onRemoteVideoTrack: { remoteCid, track in
                 onRemoteVideoTrack(remoteCid, track)
@@ -391,6 +400,10 @@ internal final class WebRtcEngine: SessionMediaEngine {
     @discardableResult
     public func toggleVideo(_ enabled: Bool) -> Bool {
 #if canImport(WebRTC)
+        guard videoMediaEnabled else {
+            localVideoTrack?.isEnabled = false
+            return false
+        }
         if enabled && cameraController.availableCameraModes.isEmpty && !screenShareController.isScreenSharing {
             localVideoTrack?.isEnabled = false
             return false
@@ -422,7 +435,11 @@ internal final class WebRtcEngine: SessionMediaEngine {
     }
 
     public func startScreenShare(onComplete: ((Bool) -> Void)? = nil) -> Bool {
-        screenShareController.startScreenShare(onComplete: onComplete)
+        guard videoMediaEnabled else {
+            onComplete?(false)
+            return false
+        }
+        return screenShareController.startScreenShare(onComplete: onComplete)
     }
 
     public func stopScreenShare() -> Bool {

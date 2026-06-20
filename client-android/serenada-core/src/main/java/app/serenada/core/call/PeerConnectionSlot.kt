@@ -29,6 +29,7 @@ internal class PeerConnectionSlot(
     private var iceServers: List<PeerConnection.IceServer>?,
     private var localAudioTrack: AudioTrack?,
     private var localVideoTrack: VideoTrack?,
+    private val videoReceiveEnabled: Boolean = true,
     private val onLocalIceCandidate: (String, IceCandidate) -> Unit,
     private val onRemoteVideoTrack: (String, VideoTrack?) -> Unit,
     private val onConnectionStateChange: (String, PeerConnection.PeerConnectionState) -> Unit,
@@ -207,6 +208,14 @@ internal class PeerConnectionSlot(
                     track.setVolume(if (playbackDucked) 0.15 else 1.0)
                 }
                 if (track is VideoTrack) {
+                    if (!videoReceiveEnabled) {
+                        logger?.log(
+                            SerenadaLogLevel.INFO,
+                            "PeerConnection",
+                            "[$remoteCid] Ignoring remote video track because video media is disabled"
+                        )
+                        return
+                    }
                     remoteVideoTrack?.removeSink(remoteVideoStateSink)
                     remoteSinks.forEach { sink -> remoteVideoTrack?.removeSink(sink) }
                     remoteVideoTrack = track
@@ -749,7 +758,7 @@ internal class PeerConnectionSlot(
                 RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.RECV_ONLY)
             )
         }
-        if (localVideoTrack == null) {
+        if (videoReceiveEnabled && localVideoTrack == null) {
             pc.addTransceiver(
                 MediaStreamTrack.MediaType.MEDIA_TYPE_VIDEO,
                 RtpTransceiver.RtpTransceiverInit(RtpTransceiver.RtpTransceiverDirection.RECV_ONLY)

@@ -35,8 +35,8 @@ public struct LocalParticipant: Equatable {
     public var cameraMode: LocalCameraMode = .selfie
     /// Camera modes the user can cycle through, in preference order.
     /// Derived from `SerenadaConfig.cameraModes` minus modes unsupported on
-    /// this device. Empty means video is unavailable — call UIs should hide
-    /// the video toggle.
+    /// this device. Empty means camera video is unavailable — call UIs should
+    /// hide the camera video toggle.
     public var availableCameraModes: [LocalCameraMode] = defaultCameraModes
     /// Whether this participant is the room host.
     public var isHost: Bool = false

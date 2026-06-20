@@ -334,7 +334,8 @@ export class SerenadaSession implements SerenadaSessionHandle {
         this.handlesReconnection = signaling.capabilities?.handlesReconnection === true;
         this.displayName = deps.displayName;
         this.appPeerId = deps.peerId;
-        this.availableCameraModes = Object.freeze(resolveCameraModes(config.cameraModes)) as ConfigurableCameraMode[];
+        const videoMediaEnabled = config.videoMediaEnabled !== false;
+        this.availableCameraModes = Object.freeze(videoMediaEnabled ? resolveCameraModes(config.cameraModes) : []) as ConfigurableCameraMode[];
         this.userPreferredVideoEnabled = this.availableCameraModes.length > 0 && config.defaultVideoEnabled !== false;
 
         this._state = {
@@ -358,6 +359,7 @@ export class SerenadaSession implements SerenadaSessionHandle {
                 initialFacingMode: initialCameraMode === 'world' ? 'environment' : 'user',
                 initialVideoEnabled: this.userPreferredVideoEnabled,
                 videoCaptureSupported: this.availableCameraModes.length > 0,
+                videoMediaEnabled,
                 deferInitialAnswer: config.deferInitialAnswer === true,
             },
             (type, payload, to) => {
@@ -527,6 +529,7 @@ export class SerenadaSession implements SerenadaSessionHandle {
 
     /** Start sharing the screen, replacing the camera video track. */
     async startScreenShare(): Promise<void> {
+        if (this.config.videoMediaEnabled === false) return;
         const wasScreenSharing = this.media.isScreenSharing;
         await this.media.startScreenShare();
         if (!this.isInactive && !wasScreenSharing && this.media.isScreenSharing) {

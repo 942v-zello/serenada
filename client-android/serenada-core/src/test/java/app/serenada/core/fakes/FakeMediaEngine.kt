@@ -30,6 +30,8 @@ internal class FakeMediaEngine : SessionMediaEngine {
     private var _iceServers: List<PeerConnection.IceServer>? = null
 
     val startVideoCaptureCalls = mutableListOf<Boolean>()
+    var startScreenShareCalls = 0
+        private set
 
     override fun startLocalMedia(startVideoCapture: Boolean) {
         startLocalMediaCalls++
@@ -42,7 +44,10 @@ internal class FakeMediaEngine : SessionMediaEngine {
         return enabled
     }
     override fun flipCamera() {}
-    override fun startScreenShare(intent: Intent): Boolean = false
+    override fun startScreenShare(intent: Intent): Boolean {
+        startScreenShareCalls++
+        return false
+    }
     override fun stopScreenShare(): Boolean = false
 
     override fun setIceServers(servers: List<PeerConnection.IceServer>) {

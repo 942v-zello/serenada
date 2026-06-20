@@ -49,7 +49,12 @@ final class FakeMediaEngine: SessionMediaEngine {
     func flipCamera() {}
     func setHdVideoExperimentalEnabled(_ enabled: Bool) {}
     @discardableResult func toggleFlashlight() -> Bool { false }
-    func startScreenShare(onComplete: ((Bool) -> Void)?) -> Bool { false }
+    private(set) var startScreenShareCalls = 0
+    func startScreenShare(onComplete: ((Bool) -> Void)?) -> Bool {
+        startScreenShareCalls += 1
+        onComplete?(false)
+        return false
+    }
     func stopScreenShare() -> Bool { false }
     private(set) var adjustCaptureZoomCalls: [CGFloat] = []
     var adjustCaptureZoomResult: Double? = 1.25

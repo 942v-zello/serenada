@@ -131,6 +131,7 @@ internal final class PeerConnectionSlot: PeerConnectionSlotProtocol {
     private let onIceConnectionStateChange: (String, String) -> Void
     private let onSignalingStateChange: (String, String) -> Void
     private let onRenegotiationNeeded: (String) -> Void
+    private let videoReceiveEnabled: Bool
     private let logger: SerenadaLogger?
     private let rendererAttachmentQueue: DispatchQueue
 
@@ -157,6 +158,7 @@ internal final class PeerConnectionSlot: PeerConnectionSlotProtocol {
         iceServers: [IceServerConfig]?,
         localAudioTrack: RTCAudioTrack?,
         localVideoTrack: RTCVideoTrack?,
+        videoReceiveEnabled: Bool = true,
         onLocalIceCandidate: @escaping (String, IceCandidatePayload) -> Void,
         onRemoteVideoTrack: @escaping (String, RTCVideoTrack?) -> Void,
         onConnectionStateChange: @escaping (String, String) -> Void,
@@ -170,6 +172,7 @@ internal final class PeerConnectionSlot: PeerConnectionSlotProtocol {
         self.iceServers = iceServers
         self.localAudioTrack = localAudioTrack
         self.localVideoTrack = localVideoTrack
+        self.videoReceiveEnabled = videoReceiveEnabled
         self.onLocalIceCandidate = onLocalIceCandidate
         self.onRemoteVideoTrack = onRemoteVideoTrack
         self.onConnectionStateChange = onConnectionStateChange
@@ -265,6 +268,14 @@ internal final class PeerConnectionSlot: PeerConnectionSlotProtocol {
             onRemoteVideoTrack: { [weak self] track in
                 Task { @MainActor in
                     guard let self else { return }
+                    guard self.videoReceiveEnabled else {
+                        self.logger?.log(
+                            .info,
+                            tag: "PeerConnection",
+                            "[\(self.remoteCid)] Ignoring remote video track because video media is disabled"
+                        )
+                        return
+                    }
                     self.remoteVideoTrack = track
                     self.attachRemoteTrackToRegisteredRenderers()
                     self.onRemoteVideoTrack(self.remoteCid, track)
@@ -745,7 +756,7 @@ private extension PeerConnectionSlot {
             transceiverInit.direction = .recvOnly
             _ = peerConnection.addTransceiver(of: .audio, init: transceiverInit)
         }
-        if peerConnection.transceivers.contains(where: { $0.mediaType == .video }) == false {
+        if videoReceiveEnabled && peerConnection.transceivers.contains(where: { $0.mediaType == .video }) == false {
             let transceiverInit = RTCRtpTransceiverInit()
             transceiverInit.direction = .recvOnly
             _ = peerConnection.addTransceiver(of: .video, init: transceiverInit)

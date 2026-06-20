@@ -304,6 +304,7 @@ public final class SerenadaSession: ObservableObject {
                 signalingProvider: nil,
                 defaultAudioEnabled: config.defaultAudioEnabled,
                 defaultVideoEnabled: config.defaultVideoEnabled,
+                videoMediaEnabled: config.videoMediaEnabled,
                 cameraModes: config.cameraModes,
                 deferInitialAnswer: config.deferInitialAnswer,
                 transports: config.transports,
@@ -342,7 +343,7 @@ public final class SerenadaSession: ObservableObject {
         self.roomId = roomId
         self.roomUrl = roomUrl
         self.config = config
-        self.availableCameraModes = SerenadaSession.resolveAvailableCameraModes(config.cameraModes)
+        self.availableCameraModes = config.videoMediaEnabled ? SerenadaSession.resolveAvailableCameraModes(config.cameraModes) : []
         self.displayName = displayName
         self.peerId = peerId
         self.delegateProvider = delegateProvider
@@ -383,6 +384,7 @@ public final class SerenadaSession: ObservableObject {
             onFlashlightStateChanged: { _, _ in }, onScreenShareStopped: {},
             onZoomFactorChanged: { _ in }, onFeatureDegradation: { _ in },
             logger: logger, isHdVideoExperimentalEnabled: false,
+            videoMediaEnabled: config.videoMediaEnabled,
             availableCameraModes: self.availableCameraModes
         )
 
@@ -651,6 +653,7 @@ public final class SerenadaSession: ObservableObject {
 
     /// Start screen sharing via the broadcast upload extension.
     public func startScreenShare() {
+        guard config.videoMediaEnabled else { return }
         guard !diagnostics.isScreenSharing else { return }
         _ = webRtcEngine.startScreenShare { [weak self] started in
             Task { @MainActor in

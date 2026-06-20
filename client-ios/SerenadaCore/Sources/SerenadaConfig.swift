@@ -26,13 +26,18 @@ public struct SerenadaConfig: Equatable, @unchecked Sendable {
     /// camera permission is not required for the initial join even when camera modes are
     /// available; the SDK requests camera access lazily if the user enables video later.
     public var defaultVideoEnabled: Bool
+    /// Whether this call can negotiate any video media. Set to `false` for strict
+    /// audio-only calls such as PSTN: camera capture, screen sharing, and remote
+    /// video are all disabled. Defaults to `true`.
+    public var videoMediaEnabled: Bool
     /// Camera modes available in the call UI, in preference order. The first
     /// entry is the initial mode. When only one mode is listed the flip-camera
-    /// control is hidden; an empty array disables video entirely (the video
-    /// toggle is hidden and the camera is never requested). Modes unsupported
-    /// on the current device are silently dropped (`.composite` is dropped on
-    /// devices without multi-cam). `.screenShare` is always ignored — screen
-    /// sharing is controlled separately. Defaults to `[.selfie, .world, .composite]`.
+    /// control is hidden; an empty array disables camera capture (the video
+    /// toggle is hidden and the camera is never requested). Remote video and
+    /// screen sharing remain available unless `videoMediaEnabled` is `false`.
+    /// Modes unsupported on the current device are silently dropped (`.composite`
+    /// is dropped on devices without multi-cam). `.screenShare` is always ignored
+    /// — screen sharing is controlled separately. Defaults to `[.selfie, .world, .composite]`.
     public var cameraModes: [LocalCameraMode]?
     /// When `true`, defer the initial-negotiation offer-timeout/ICE-restart while the host peer
     /// awaits its first answer. Use for app-owned calls whose answer is gated on a remote action
@@ -53,6 +58,7 @@ public struct SerenadaConfig: Equatable, @unchecked Sendable {
         signalingProvider: SignalingProvider? = nil,
         defaultAudioEnabled: Bool = true,
         defaultVideoEnabled: Bool = true,
+        videoMediaEnabled: Bool = true,
         cameraModes: [LocalCameraMode]? = nil,
         deferInitialAnswer: Bool = false,
         transports: [SerenadaTransport] = [.ws, .sse],
@@ -64,6 +70,7 @@ public struct SerenadaConfig: Equatable, @unchecked Sendable {
         self.signalingProvider = signalingProvider
         self.defaultAudioEnabled = defaultAudioEnabled
         self.defaultVideoEnabled = defaultVideoEnabled
+        self.videoMediaEnabled = videoMediaEnabled
         self.cameraModes = cameraModes
         self.deferInitialAnswer = deferInitialAnswer
         self.transports = transports
@@ -76,6 +83,7 @@ public struct SerenadaConfig: Equatable, @unchecked Sendable {
         lhs.serverHost == rhs.serverHost
             && lhs.defaultAudioEnabled == rhs.defaultAudioEnabled
             && lhs.defaultVideoEnabled == rhs.defaultVideoEnabled
+            && lhs.videoMediaEnabled == rhs.videoMediaEnabled
             && lhs.cameraModes == rhs.cameraModes
             && lhs.deferInitialAnswer == rhs.deferInitialAnswer
             && lhs.transports == rhs.transports

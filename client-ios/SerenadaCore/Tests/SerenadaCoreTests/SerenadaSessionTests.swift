@@ -141,6 +141,53 @@ final class SerenadaSessionTests: XCTestCase {
         session.cancelJoin()
     }
 
+    func testStrictAudioOnlyHidesCameraModesAndBlocksScreenShare() async {
+        let provider = FakeSignalingProvider()
+        let media = FakeMediaEngine()
+        let session = SerenadaSession(
+            roomId: "provider-room",
+            config: SerenadaConfig(
+                signalingProvider: provider,
+                videoMediaEnabled: false,
+                audioCoordinator: FakeAudioCoordinator()
+            ),
+            initialSignalingProvider: provider,
+            mediaEngine: media
+        )
+
+        await yieldToMainActor()
+        session.startScreenShare()
+        await yieldToMainActor()
+
+        XCTAssertTrue(session.state.localParticipant.availableCameraModes.isEmpty)
+        XCTAssertFalse(session.state.requiredPermissions?.contains(.camera) ?? false)
+        XCTAssertEqual(media.startScreenShareCalls, 0)
+        session.cancelJoin()
+    }
+
+    func testEmptyCameraModesCanStillRequestScreenShare() async {
+        let provider = FakeSignalingProvider()
+        let media = FakeMediaEngine()
+        let session = SerenadaSession(
+            roomId: "provider-room",
+            config: SerenadaConfig(
+                signalingProvider: provider,
+                cameraModes: [],
+                audioCoordinator: FakeAudioCoordinator()
+            ),
+            initialSignalingProvider: provider,
+            mediaEngine: media
+        )
+
+        await yieldToMainActor()
+        session.startScreenShare()
+        await yieldToMainActor()
+
+        XCTAssertTrue(session.state.localParticipant.availableCameraModes.isEmpty)
+        XCTAssertEqual(media.startScreenShareCalls, 1)
+        session.cancelJoin()
+    }
+
     func testAudioSessionRestartedRestartsAudioUnitAndClearsExternalMute() async {
         let provider = FakeSignalingProvider()
         let media = FakeMediaEngine()
