@@ -24,13 +24,21 @@ data class SerenadaConfig(
     /** Whether video starts enabled (default true). */
     val defaultVideoEnabled: Boolean = true,
     /**
+     * Whether this call can negotiate any video media. Set false for strict
+     * audio-only calls such as PSTN: camera capture, screen sharing, and
+     * remote video are all disabled. Defaults to true.
+     */
+    val videoMediaEnabled: Boolean = true,
+    /**
      * Camera modes available in the call UI, in preference order. The first
      * entry is the initial mode. When only one mode is listed the flip-camera
-     * control is hidden; an empty list disables video entirely (the video
-     * toggle is hidden and the camera is never requested). Modes unsupported
-     * on the current device are silently dropped (`COMPOSITE` is dropped on
-     * devices without multi-cam). `SCREEN_SHARE` is always ignored — screen
-     * sharing is controlled separately. Defaults to `[SELFIE, WORLD, COMPOSITE]`.
+     * control is hidden; an empty list disables camera capture (the video
+     * toggle is hidden and the camera is never requested). Remote video and
+     * screen sharing remain available unless [videoMediaEnabled] is false.
+     * Modes unsupported on the current device are silently dropped
+     * (`COMPOSITE` is dropped on devices without multi-cam). `SCREEN_SHARE` is
+     * always ignored — screen sharing is controlled separately. Defaults to
+     * `[SELFIE, WORLD, COMPOSITE]`.
      */
     val cameraModes: List<LocalCameraMode>? = null,
     /** Enable experimental HD video capture. */

@@ -135,6 +135,7 @@ public final class SerenadaCore {
                 signalingProvider: nil,
                 defaultAudioEnabled: config.defaultAudioEnabled,
                 defaultVideoEnabled: config.defaultVideoEnabled,
+                videoMediaEnabled: config.videoMediaEnabled,
                 cameraModes: config.cameraModes,
                 deferInitialAnswer: config.deferInitialAnswer,
                 transports: config.transports,

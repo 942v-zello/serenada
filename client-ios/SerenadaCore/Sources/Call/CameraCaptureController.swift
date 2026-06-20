@@ -32,6 +32,9 @@ final class CameraCaptureController {
     private(set) var currentZoomFactor: CGFloat = 1
     var availableCameraModes: [LocalCameraMode] = [.selfie, .world, .composite]
 
+    /// True when this device has at least one camera mode available to capture video with.
+    var canCaptureVideo: Bool { !availableCameraModes.isEmpty }
+
 #if canImport(WebRTC)
     private(set) var localVideoCapturer: RTCCameraVideoCapturer?
     private(set) var compositeVideoCapturer: CompositeCameraVideoCapturer?

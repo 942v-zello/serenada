@@ -40,6 +40,7 @@ internal class WebRtcEngine(
     private val onFeatureDegradation: (FeatureDegradationState) -> Unit = {},
     private var isHdVideoExperimentalEnabled: Boolean = false,
     private var isRemoteBlackFrameAnalysisEnabled: Boolean = true,
+    private val videoMediaEnabled: Boolean = true,
     availableCameraModes: List<LocalCameraMode> = app.serenada.core.DEFAULT_CAMERA_MODES,
     private val logger: SerenadaLogger? = null,
 ) : SessionMediaEngine {
@@ -211,14 +212,14 @@ internal class WebRtcEngine(
         applyAudioTrackHints()
         localAudioTrack?.let { audioPipelinePrimer.start(it) }
 
-        if (cameraController.availableCameraModes.isEmpty()) {
+        if (!videoMediaEnabled || cameraController.availableCameraModes.isEmpty()) {
             peerSlots.forEach { slot ->
                 slot.attachLocalTracks(localAudioTrack, null)
             }
             return
         }
 
-        videoSource = peerConnectionFactory.createVideoSource(false)
+        ensureVideoSource()
         cameraController.resetCameraSourceToInitial()
         val startedVideo = startVideoCapture && restartVideoCapturerWithFallback(cameraController.currentCameraSource)
         if (!startedVideo) {
@@ -228,14 +229,36 @@ internal class WebRtcEngine(
                 logger?.log(SerenadaLogLevel.INFO, "WebRTC", "Camera starts disabled; continuing audio-only")
             }
         }
-        localVideoTrack = peerConnectionFactory.createVideoTrack("ARDAMSv0", videoSource)
-        localVideoTrack?.setEnabled(startedVideo)
-        localSinks.forEach { sink ->
-            localVideoTrack?.addSink(sink)
-        }
+        ensureLocalVideoTrack(enabled = startedVideo)
         peerSlots.forEach { slot ->
             slot.attachLocalTracks(localAudioTrack, localVideoTrack)
         }
+    }
+
+    private fun ensureVideoSource(): org.webrtc.VideoSource {
+        return videoSource ?: peerConnectionFactory.createVideoSource(false).also { videoSource = it }
+    }
+
+    private fun ensureLocalVideoTrack(enabled: Boolean): VideoTrack {
+        localVideoTrack?.let { track ->
+            track.setEnabled(enabled)
+            return track
+        }
+        return peerConnectionFactory.createVideoTrack("ARDAMSv0", ensureVideoSource()).also { track ->
+            track.setEnabled(enabled)
+            localSinks.forEach { sink -> track.addSink(sink) }
+            localVideoTrack = track
+        }
+    }
+
+    private fun disposeLocalVideoTrack() {
+        localVideoTrack?.let { track ->
+            localSinks.forEach { sink -> track.removeSink(sink) }
+            track.dispose()
+        }
+        localVideoTrack = null
+        videoSource?.dispose()
+        videoSource = null
     }
 
     fun stopLocalMedia() {
@@ -244,19 +267,13 @@ internal class WebRtcEngine(
         localVideoTrack?.setEnabled(false)
         localAudioTrack?.setEnabled(false)
         cameraController.disposeVideoCapturer()
-        localVideoTrack?.let { track ->
-            localSinks.forEach { sink -> track.removeSink(sink) }
-            track.dispose()
-        }
+        disposeLocalVideoTrack()
         // Tear down the primer before disposing its audio track — closing the
         // PC first releases the sender's reference to the track.
         audioPipelinePrimer.stop()
         localAudioTrack?.dispose()
-        videoSource?.dispose()
-        videoSource = null
         audioSource?.dispose()
         audioSource = null
-        localVideoTrack = null
         localAudioTrack = null
     }
 
@@ -302,6 +319,10 @@ internal class WebRtcEngine(
     }
 
     override fun toggleVideo(enabled: Boolean): Boolean {
+        if (!videoMediaEnabled) {
+            localVideoTrack?.setEnabled(false)
+            return false
+        }
         if (enabled && cameraController.availableCameraModes.isEmpty() && !screenShareController.isScreenSharing) {
             localVideoTrack?.setEnabled(false)
             return false
@@ -364,11 +385,32 @@ internal class WebRtcEngine(
     }
 
     override fun startScreenShare(intent: Intent): Boolean {
-        return screenShareController.startScreenShare(intent)
+        if (!videoMediaEnabled) return false
+        val createdVideoTrack = localVideoTrack == null
+        ensureLocalVideoTrack(enabled = false)
+        val started = screenShareController.startScreenShare(intent)
+        if (!started) {
+            if (createdVideoTrack && !cameraController.canCaptureVideo) {
+                disposeLocalVideoTrack()
+            }
+            return false
+        }
+        localVideoTrack?.setEnabled(true)
+        peerSlots.forEach { slot ->
+            slot.attachLocalTracks(localAudioTrack, localVideoTrack)
+        }
+        return true
     }
 
     override fun stopScreenShare(): Boolean {
-        return screenShareController.stopScreenShare()
+        val stopped = screenShareController.stopScreenShare()
+        if (stopped && !cameraController.canCaptureVideo) {
+            localVideoTrack?.setEnabled(false)
+            peerSlots.forEach { slot ->
+                slot.attachLocalTracks(localAudioTrack, null)
+            }
+        }
+        return stopped
     }
 
     fun setRemoteBlackFrameAnalysisEnabled(enabled: Boolean) {
@@ -390,6 +432,7 @@ internal class WebRtcEngine(
             iceServers = iceServers,
             localAudioTrack = localAudioTrack,
             localVideoTrack = localVideoTrack,
+            videoReceiveEnabled = videoMediaEnabled,
             onLocalIceCandidate = onLocalIceCandidate,
             onRemoteVideoTrack = onRemoteVideoTrack,
             onConnectionStateChange = onConnectionStateChange,

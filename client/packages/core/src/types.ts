@@ -75,8 +75,8 @@ export interface LocalParticipant {
     /**
      * Camera modes the user can cycle through, in preference order.
      * Derived from {@link SerenadaConfig.cameraModes} minus modes unsupported
-     * on this device/platform. An empty array means video is unavailable
-     * — the call UI should hide the video toggle.
+     * on this device/platform. An empty array means camera video is unavailable
+     * — the call UI should hide the camera video toggle.
      */
     availableCameraModes: ConfigurableCameraMode[];
     isHost: boolean;
@@ -192,12 +192,20 @@ export interface SerenadaConfig {
     /** Whether the camera is enabled when joining. Defaults to `true`. */
     defaultVideoEnabled?: boolean;
     /**
+     * Whether this call can negotiate any video media. Set to `false` for strict
+     * audio-only calls such as PSTN: camera capture, screen sharing, and remote
+     * video are all disabled. Defaults to `true`.
+     */
+    videoMediaEnabled?: boolean;
+    /**
      * Camera modes available in the call UI, in preference order. The first
      * entry is the initial mode. When only one mode is listed the flip-camera
-     * control is hidden; an empty array disables video entirely (the video
-     * toggle is hidden and the camera is never requested). Modes unsupported
-     * on the current platform or device are silently dropped (`'composite'`
-     * is always dropped on web). Defaults to `['selfie', 'world', 'composite']`.
+     * control is hidden; an empty array disables camera capture (the video
+     * toggle is hidden and the camera is never requested). Remote video and
+     * screen sharing remain available unless `videoMediaEnabled` is `false`.
+     * Modes unsupported on the current platform or device are silently dropped
+     * (`'composite'` is always dropped on web). Defaults to
+     * `['selfie', 'world', 'composite']`.
      */
     cameraModes?: ConfigurableCameraMode[];
     /**

@@ -82,8 +82,8 @@ data class CallState(
     /**
      * Camera modes the user can cycle through, in preference order. Derived
      * from [SerenadaConfig.cameraModes] minus modes unsupported on this
-     * device. Empty means video is unavailable — call UIs should hide the
-     * video toggle.
+     * device. Empty means camera video is unavailable — call UIs should hide
+     * the camera video toggle.
      */
     val availableCameraModes: List<LocalCameraMode> = DEFAULT_CAMERA_MODES,
     /** Current error, if any. */

@@ -69,7 +69,8 @@ internal class ScreenShareController(
             runCatching { capturer.dispose() }
             runCatching { textureHelper.dispose() }
             val videoSource = videoSourceProvider()
-            if (!cameraController.restartVideoCapturer(previousSource, videoSource)) {
+            if (cameraController.canCaptureVideo &&
+                !cameraController.restartVideoCapturer(previousSource, videoSource)) {
                 cameraController.restartVideoCapturer(CameraCaptureController.LocalCameraSource.SELFIE, videoSource)
             }
             false
@@ -83,6 +84,7 @@ internal class ScreenShareController(
         cameraController.isScreenSharing = false
         cameraController.cameraSourceBeforeScreenShare = null
         cameraController.disposeVideoCapturer()
+        if (!cameraController.canCaptureVideo) return true
         val videoSource = videoSourceProvider()
         if (!cameraController.restartVideoCapturer(sourceToRestore, videoSource) &&
             !cameraController.restartVideoCapturer(CameraCaptureController.LocalCameraSource.SELFIE, videoSource)) {

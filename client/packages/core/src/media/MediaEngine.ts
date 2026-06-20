@@ -83,6 +83,8 @@ export interface MediaEngineConfig {
     initialVideoEnabled?: boolean;
     /** When `false`, the camera is never requested and video is always off. */
     videoCaptureSupported?: boolean;
+    /** When `false`, no video media is negotiated or received. */
+    videoMediaEnabled?: boolean;
     /** Defer initial offer timeout/ICE restart while awaiting the first answer. */
     deferInitialAnswer?: boolean;
 }
@@ -91,10 +93,11 @@ export class MediaEngine {
     localStream: MediaStream | null = null;
     remoteStreams = new Map<string, MediaStream>();
     isScreenSharing = false;
-    canScreenShare = !!navigator.mediaDevices?.getDisplayMedia;
+    canScreenShare = false;
     facingMode: 'user' | 'environment' = 'user';
     hasMultipleCameras = false;
     readonly videoCaptureSupported: boolean;
+    readonly videoMediaEnabled: boolean;
     iceConnectionState: RTCIceConnectionState = 'new';
     connectionState: RTCPeerConnectionState = 'new';
     signalingState: RTCSignalingState = 'stable';
@@ -151,7 +154,9 @@ export class MediaEngine {
         this.logger = config.logger;
         this.facingMode = config.initialFacingMode ?? 'user';
         this.initialVideoEnabled = config.initialVideoEnabled !== false;
-        this.videoCaptureSupported = config.videoCaptureSupported !== false;
+        this.videoMediaEnabled = config.videoMediaEnabled !== false;
+        this.videoCaptureSupported = this.videoMediaEnabled && config.videoCaptureSupported !== false;
+        this.canScreenShare = this.videoMediaEnabled && !!navigator.mediaDevices?.getDisplayMedia;
         this.sendSignalingMessage = sendMessage;
         this.setupEventListeners();
     }
@@ -717,6 +722,10 @@ export class MediaEngine {
         this.ensureMediaTransceivers(pc);
 
         pc.ontrack = (event) => {
+            if (event.track.kind === 'video' && !this.videoMediaEnabled) {
+                this.logger?.log('info', 'WebRTC', `[${remoteCid}] Ignoring remote video track because video media is disabled`);
+                return;
+            }
             this.logger?.log('debug', 'WebRTC', `[${remoteCid}] Remote track received`);
             let remoteStream: MediaStream;
             if (event.streams?.[0]) {
@@ -1071,6 +1080,9 @@ export class MediaEngine {
             }
             throw err;
         }
+        if (!this.videoMediaEnabled) {
+            this.rejectRemoteVideoTransceivers(peer.pc, fromCid);
+        }
         peer.acceptedRemoteOfferId = offerId;
         peer.currentNegotiationId = offerId;
         if (peer.offerTimeout) { window.clearTimeout(peer.offerTimeout); peer.offerTimeout = null; }
@@ -1272,7 +1284,7 @@ export class MediaEngine {
                 if (videoTransceiver) {
                     try {
                         await videoTransceiver.sender.replaceTrack(newTrack);
-                        if (videoTransceiver.direction !== 'sendrecv' && videoTransceiver.direction !== 'stopped' && this.videoCaptureSupported) {
+                        if (newTrack && videoTransceiver.direction !== 'sendrecv' && videoTransceiver.direction !== 'stopped' && this.videoMediaEnabled) {
                             videoTransceiver.direction = 'sendrecv';
                         }
                         if (newTrack && this.needsLocalTrackNegotiation(videoTransceiver)) {
@@ -1461,16 +1473,35 @@ export class MediaEngine {
         if (!this.findTransceiver(pc, 'audio') && !pc.getSenders().some(sender => sender.track?.kind === 'audio')) {
             pc.addTransceiver('audio', { direction: 'recvonly' });
         }
-        if (!this.findTransceiver(pc, 'video') && !pc.getSenders().some(sender => sender.track?.kind === 'video')) {
+        if (this.videoMediaEnabled && !this.findTransceiver(pc, 'video') && !pc.getSenders().some(sender => sender.track?.kind === 'video')) {
             pc.addTransceiver('video', { direction: this.videoCaptureSupported ? 'sendrecv' : 'recvonly' });
         }
     }
 
+    private rejectRemoteVideoTransceivers(pc: RTCPeerConnection, remoteCid: string): void {
+        for (const transceiver of pc.getTransceivers().filter(candidate => this.isTransceiverKind(candidate, 'video'))) {
+            try {
+                if (transceiver.direction !== 'inactive' && transceiver.direction !== 'stopped') {
+                    transceiver.direction = 'inactive';
+                }
+            } catch (err) {
+                this.logger?.log('warning', 'WebRTC', `[${remoteCid}] Failed to reject remote video transceiver: ${formatError(err)}`);
+            }
+            if (transceiver.sender.track?.kind === 'video') {
+                void transceiver.sender.replaceTrack(null).catch(err => {
+                    this.logger?.log('warning', 'WebRTC', `[${remoteCid}] Failed to detach rejected video sender: ${formatError(err)}`);
+                });
+            }
+        }
+    }
+
     private findTransceiver(pc: RTCPeerConnection, kind: 'audio' | 'video'): RTCRtpTransceiver | undefined {
-        const transceivers = pc.getTransceivers().filter(transceiver => (
-            transceiver.receiver.track?.kind === kind || transceiver.sender.track?.kind === kind
-        ));
+        const transceivers = pc.getTransceivers().filter(transceiver => this.isTransceiverKind(transceiver, kind));
         return transceivers.find(transceiver => transceiver.mid !== null) ?? transceivers[0];
+    }
+
+    private isTransceiverKind(transceiver: RTCRtpTransceiver, kind: 'audio' | 'video'): boolean {
+        return transceiver.receiver.track?.kind === kind || transceiver.sender.track?.kind === kind;
     }
 
     private async attachLocalTracksToPeer(remoteCid: string, peer: PeerState, stream: MediaStream): Promise<void> {
