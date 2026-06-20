@@ -584,7 +584,12 @@ final class PeerNegotiationEngine {
                     self.updateAggregatePeerState()
                     self.onConnectionStatusUpdate()
                 } else if self.shouldIOffer(remoteCid: remoteCid) {
-                    self.scheduleIceRestart(remoteCid: remoteCid, reason: "answer-apply-failed", delayMs: 0)
+                    self.scheduleIceRestart(
+                        remoteCid: remoteCid,
+                        reason: "answer-apply-failed",
+                        delayMs: 0,
+                        allowBeforeFirstAnswer: true
+                    )
                 }
             }
         }
@@ -635,11 +640,11 @@ final class PeerNegotiationEngine {
 
     // MARK: - Offer Logic
 
-    /// True while a deferred-answer call (e.g. PSTN) is awaiting its first answer from `remoteCid`.
+    /// True while this peer is the deferred-answer offerer awaiting its first answer from `remoteCid`.
     /// Gates the initial offer-timeout/ICE-restart/media-restart suppression; renegotiations after
     /// the first answer behave normally.
     private func isDeferringInitialNegotiation(_ remoteCid: String) -> Bool {
-        deferInitialAnswer() && !initialAnswerReceivedCids.contains(remoteCid)
+        deferInitialAnswer() && shouldIOffer(remoteCid: remoteCid) && !initialAnswerReceivedCids.contains(remoteCid)
     }
 
     private func shouldIOffer(remoteCid: String, roomState: RoomState? = nil) -> Bool {
@@ -958,9 +963,14 @@ final class PeerNegotiationEngine {
 
     // MARK: - ICE Restart
 
-    func scheduleIceRestart(remoteCid: String, reason: String, delayMs: Int) {
+    func scheduleIceRestart(
+        remoteCid: String,
+        reason: String,
+        delayMs: Int,
+        allowBeforeFirstAnswer: Bool = false
+    ) {
         guard let slot = getSlot(remoteCid) else { return }
-        if isDeferringInitialNegotiation(remoteCid) {
+        if !allowBeforeFirstAnswer && isDeferringInitialNegotiation(remoteCid) {
             return
         }
         if !canOffer(slot: slot) {
@@ -988,7 +998,11 @@ final class PeerNegotiationEngine {
             }
             guard !Task.isCancelled else { return }
             await MainActor.run {
-                self?.triggerIceRestart(remoteCid: remoteCid, reason: reason)
+                self?.triggerIceRestart(
+                    remoteCid: remoteCid,
+                    reason: reason,
+                    allowBeforeFirstAnswer: allowBeforeFirstAnswer
+                )
             }
         })
     }
@@ -1004,10 +1018,14 @@ final class PeerNegotiationEngine {
         }
     }
 
-    private func triggerIceRestart(remoteCid: String, reason: String) {
+    private func triggerIceRestart(
+        remoteCid: String,
+        reason: String,
+        allowBeforeFirstAnswer: Bool = false
+    ) {
         guard let slot = getSlot(remoteCid) else { return }
         slot.cancelIceRestartTask()
-        if isDeferringInitialNegotiation(remoteCid) {
+        if !allowBeforeFirstAnswer && isDeferringInitialNegotiation(remoteCid) {
             logger?.log(.debug, tag: "PeerNegotiationEngine", "Suppressing ICE restart for \(remoteCid) before first answer (\(reason))")
             return
         }
@@ -1027,7 +1045,12 @@ final class PeerNegotiationEngine {
             slot.markPendingIceRestart()
             if signalingState == "HAVE_LOCAL_OFFER" {
                 pendingLocalOfferIds.removeValue(forKey: remoteCid)
-                rollbackStaleLocalOfferAndRetryIceRestart(slot: slot, remoteCid: remoteCid, reason: reason)
+                rollbackStaleLocalOfferAndRetryIceRestart(
+                    slot: slot,
+                    remoteCid: remoteCid,
+                    reason: reason,
+                    allowBeforeFirstAnswer: allowBeforeFirstAnswer
+                )
             }
             return
         }
@@ -1039,7 +1062,8 @@ final class PeerNegotiationEngine {
     private func rollbackStaleLocalOfferAndRetryIceRestart(
         slot: any PeerConnectionSlotProtocol,
         remoteCid: String,
-        reason: String
+        reason: String,
+        allowBeforeFirstAnswer: Bool = false
     ) {
         slot.rollbackLocalDescription { [weak self] success in
             Task { @MainActor in
@@ -1047,10 +1071,14 @@ final class PeerNegotiationEngine {
                 if success {
                     guard let currentSlot = self.getSlot(remoteCid),
                           currentSlot.getSignalingState() == "STABLE",
-                          currentSlot.pendingIceRestart else {
+                          currentSlot.pendingIceRestart || allowBeforeFirstAnswer else {
                         return
                     }
-                    self.triggerIceRestart(remoteCid: remoteCid, reason: "\(reason)-rollback")
+                    self.triggerIceRestart(
+                        remoteCid: remoteCid,
+                        reason: "\(reason)-rollback",
+                        allowBeforeFirstAnswer: allowBeforeFirstAnswer
+                    )
                 } else {
                     self.scheduleOfferTimeout(remoteCid: remoteCid)
                 }

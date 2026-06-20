@@ -195,6 +195,31 @@ class SessionNegotiationTest {
         assertFalse("pendingIceRestart should be cleared", fakeSlot.pendingIceRestart)
     }
 
+    @Test
+    fun `deferred first answer apply failure retries ICE restart`() {
+        resetFactory(deferInitialAnswer = true)
+        factory.advanceToInCallWithTurn(
+            localCid = "zulu",
+            remoteCid = "alpha",
+            localJoinedAt = 1,
+            remoteJoinedAt = 2,
+            hostCid = "zulu",
+        )
+
+        val fakeSlot = factory.fakeMedia.fakeSlots["alpha"]
+        assertNotNull(fakeSlot)
+        val offersBefore = factory.fakeProvider.sentMessages("offer").size
+        fakeSlot!!.failNextRemoteAnswer = true
+
+        factory.simulateAnswerFromRemote("alpha", offerId = latestOfferId())
+        ShadowLooper.idleMainLooper()
+        ShadowLooper.idleMainLooper(100, TimeUnit.MILLISECONDS)
+
+        assertTrue("Failed first answer should roll back the stale local offer", fakeSlot.rollbackCalls > 0)
+        assertEquals("Failed first answer should send a recovery offer", offersBefore + 1, factory.fakeProvider.sentMessages("offer").size)
+        assertEquals("Recovery offer should be an ICE restart", true, fakeSlot.createOfferIceRestartFlags.last())
+    }
+
     // Group 2: ICE Candidate Relay
 
     @Test

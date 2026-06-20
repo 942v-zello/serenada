@@ -28,6 +28,7 @@ class FakeRtcPeerConnection {
     getStatsCalls = 0;
     rollbackCalls = 0;
     failNextRemoteOffer = false;
+    failNextRemoteAnswer = false;
     closed = false;
     ontrack: ((event: RTCTrackEvent) => void) | null = null;
     oniceconnectionstatechange: (() => void) | null = null;
@@ -104,6 +105,10 @@ class FakeRtcPeerConnection {
         if (description.type === 'offer' && this.failNextRemoteOffer) {
             this.failNextRemoteOffer = false;
             throw new Error('set remote offer failed');
+        }
+        if (description.type === 'answer' && this.failNextRemoteAnswer) {
+            this.failNextRemoteAnswer = false;
+            throw new Error('set remote answer failed');
         }
         if (description.type === 'offer') {
             this.ensureRemoteOfferTransceiver('audio', '0');
@@ -1057,6 +1062,52 @@ describe('MediaEngine', () => {
         await vi.waitFor(() => {
             expect(sentMessages.filter((message) => message.type === 'offer')).toHaveLength(1);
         });
+    });
+
+    it('retries ICE restart when a deferred first answer fails to apply', async () => {
+        Object.defineProperty(globalThis, 'navigator', {
+            value: {
+                mediaDevices: {
+                    getUserMedia: vi.fn().mockResolvedValue(createMediaStream()),
+                    enumerateDevices: vi.fn().mockResolvedValue([]),
+                    addEventListener() {},
+                    removeEventListener() {},
+                },
+            },
+            configurable: true,
+        });
+        const sentMessages: Array<{ type: string; payload?: Record<string, unknown>; to?: string }> = [];
+        const engine = new MediaEngine({ initialVideoEnabled: false, deferInitialAnswer: true }, (type, payload, to) => {
+            sentMessages.push({ type, payload, to });
+        });
+
+        engine.updateSignalingConnected(true);
+        await engine.startLocalMedia();
+        engine.updateRoomState({
+            hostCid: 'zeta',
+            participants: [{ cid: 'zeta' }, { cid: 'alpha' }],
+        }, 'zeta');
+        await vi.waitFor(() => {
+            expect(sentMessages.filter((message) => message.type === 'offer')).toHaveLength(1);
+        });
+
+        const peer = engine.getPeerConnectionsMap().get('alpha') as FakeRtcPeerConnection;
+        expect(peer).toBeDefined();
+        const offerId = sentMessages.find((message) => message.type === 'offer')?.payload?.offerId;
+        expect(typeof offerId).toBe('string');
+        peer.failNextRemoteAnswer = true;
+
+        engine.processSignalingMessage({
+            v: 1,
+            type: 'answer',
+            payload: { from: 'alpha', sdp: 'remote-answer', offerId },
+        });
+
+        await vi.waitFor(() => {
+            expect(sentMessages.filter((message) => message.type === 'offer')).toHaveLength(2);
+        });
+        expect(peer.rollbackCalls).toBe(1);
+        expect(peer.createOfferCalls).toBe(2);
     });
 
     it('keeps the deferred two-party non-host from offering even when its peer ID sorts earlier', async () => {

@@ -872,12 +872,12 @@ export class MediaEngine {
     }
 
     /**
-     * True while a deferred-answer call (e.g. PSTN) is awaiting its first answer from `remoteCid`.
+     * True while this peer is the deferred-answer offerer awaiting its first answer from `remoteCid`.
      * Gates the initial offer-timeout/ICE-restart/media-restart suppression; renegotiations after
      * the first answer behave normally.
      */
     private isDeferringInitialNegotiation(remoteCid: string): boolean {
-        return this.deferInitialAnswer && !this.initialAnswerReceivedCids.has(remoteCid);
+        return this.deferInitialAnswer && this.shouldIOffer(remoteCid) && !this.initialAnswerReceivedCids.has(remoteCid);
     }
 
     private nextOfferId(remoteCid: string): string {
@@ -960,10 +960,15 @@ export class MediaEngine {
         }
     }
 
-    private scheduleIceRestart(remoteCid: string, reason: string, delayMs: number): void {
+    private scheduleIceRestart(
+        remoteCid: string,
+        reason: string,
+        delayMs: number,
+        options?: { allowBeforeFirstAnswer?: boolean },
+    ): void {
         const peer = this.peers.get(remoteCid);
         if (!peer) return;
-        if (this.isDeferringInitialNegotiation(remoteCid)) {
+        if (!options?.allowBeforeFirstAnswer && this.isDeferringInitialNegotiation(remoteCid)) {
             return;
         }
         if (!this.isSignalingConnected || !this.isParticipantActive(remoteCid)) { peer.pendingIceRestart = true; return; }
@@ -977,14 +982,22 @@ export class MediaEngine {
         );
         peer.iceRestartTimer = window.setTimeout(() => {
             peer.iceRestartTimer = null;
-            void this.triggerIceRestart(remoteCid, reason);
+            if (options) {
+                void this.triggerIceRestart(remoteCid, reason, options);
+            } else {
+                void this.triggerIceRestart(remoteCid, reason);
+            }
         }, Math.max(delayMs, cooldownRemainingMs));
     }
 
-    private async triggerIceRestart(remoteCid: string, reason: string): Promise<void> {
+    private async triggerIceRestart(
+        remoteCid: string,
+        reason: string,
+        options?: { allowBeforeFirstAnswer?: boolean },
+    ): Promise<void> {
         const peer = this.peers.get(remoteCid);
         if (!peer) return;
-        if (this.isDeferringInitialNegotiation(remoteCid)) {
+        if (!options?.allowBeforeFirstAnswer && this.isDeferringInitialNegotiation(remoteCid)) {
             this.logger?.log('debug', 'WebRTC', `[${remoteCid}] Suppressing ICE restart before first answer (${reason})`);
             return;
         }
@@ -1078,6 +1091,7 @@ export class MediaEngine {
     }
 
     private async handleAnswerFrom(fromCid: string, sdp: string, offerId: string): Promise<void> {
+        let shouldRecoverFromFailedAnswer = false;
         try {
             const peer = this.peers.get(fromCid);
             if (!peer) return;
@@ -1094,7 +1108,9 @@ export class MediaEngine {
                 return;
             }
             peer.isSettingRemoteAnswerPending = true;
+            shouldRecoverFromFailedAnswer = this.shouldIOffer(fromCid);
             await peer.pc.setRemoteDescription(new RTCSessionDescription({ type: 'answer', sdp }));
+            shouldRecoverFromFailedAnswer = false;
             peer.isSettingRemoteAnswerPending = false;
             this.initialAnswerReceivedCids.add(fromCid);
             const completedOfferId = pendingOfferId ?? offerId;
@@ -1114,6 +1130,9 @@ export class MediaEngine {
         } catch (err) {
             const peer = this.peers.get(fromCid);
             if (peer) peer.isSettingRemoteAnswerPending = false;
+            if (shouldRecoverFromFailedAnswer) {
+                this.scheduleIceRestart(fromCid, 'answer-apply-failed', 0, { allowBeforeFirstAnswer: true });
+            }
             this.logger?.log('error', 'WebRTC', `[${fromCid}] Error handling answer: ${formatError(err)}`);
         }
     }

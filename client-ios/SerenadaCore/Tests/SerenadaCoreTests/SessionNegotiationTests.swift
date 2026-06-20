@@ -163,6 +163,30 @@ final class SessionNegotiationTests: XCTestCase {
         XCTAssertEqual(fakeSlot?.pendingIceRestart, false, "pendingIceRestart should be cleared after answer")
     }
 
+    func testDeferredFirstAnswerApplyFailureRetriesIceRestart() async throws {
+        resetHarness(deferInitialAnswer: true)
+        await harness.advanceToInCallWithTurn(
+            localCid: "zulu",
+            remoteCid: "alpha",
+            localJoinedAt: 1,
+            remoteJoinedAt: 2,
+            hostCid: "zulu"
+        )
+
+        let fakeSlot = try XCTUnwrap(harness.fakeMedia.fakeSlots["alpha"])
+        let offersBefore = harness.fakeProvider.sentPeerMessages(ofType: "offer").count
+        fakeSlot.failNextRemoteAnswer = true
+
+        harness.simulateAnswerFromRemote(fromCid: "alpha", offerId: try latestOfferId())
+        await waitUntil {
+            harness.fakeProvider.sentPeerMessages(ofType: "offer").count == offersBefore + 1
+        }
+
+        XCTAssertGreaterThan(fakeSlot.rollbackCalls, 0, "Failed first answer should roll back the stale local offer")
+        XCTAssertEqual(harness.fakeProvider.sentPeerMessages(ofType: "offer").count, offersBefore + 1)
+        XCTAssertEqual(fakeSlot.createOfferIceRestartFlags.last, true, "Recovery offer should be an ICE restart")
+    }
+
     // MARK: - Group 2: ICE Candidate Relay
 
     func testRemoteIceCandidateAddedToSlot() async throws {

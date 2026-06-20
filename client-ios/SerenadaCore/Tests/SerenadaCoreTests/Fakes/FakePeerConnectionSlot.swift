@@ -30,6 +30,7 @@ final class FakePeerConnectionSlot: PeerConnectionSlotProtocol {
     private(set) var closePeerConnectionCalled = false
     private(set) var ensurePeerConnectionCalls = 0
     var failNextRemoteOffer = false
+    var failNextRemoteAnswer = false
     var failNextRollback = false
 
     // Callbacks for driving state changes
@@ -139,6 +140,11 @@ final class FakePeerConnectionSlot: PeerConnectionSlotProtocol {
         setRemoteDescriptionCalls.append((type: type, sdp: sdp))
         if type == .offer, failNextRemoteOffer {
             failNextRemoteOffer = false
+            onComplete?(false)
+            return
+        }
+        if type == .answer, failNextRemoteAnswer {
+            failNextRemoteAnswer = false
             onComplete?(false)
             return
         }
