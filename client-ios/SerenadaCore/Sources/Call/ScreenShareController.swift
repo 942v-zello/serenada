@@ -130,7 +130,7 @@ final class ScreenShareController {
             guard self.broadcastFrameReader === reader, !self.isScreenSharing else { return }
             self.broadcastFrameReader?.stopListening()
             self.broadcastFrameReader = nil
-            if self.cameraController.availableCameraModes.isEmpty == false {
+            if self.cameraController.canCaptureVideo {
                 _ = self.cameraController.restartVideoCapturer(source: previousSource)
             }
             self.cameraController.notifyCameraModeAndFlash()
@@ -161,7 +161,7 @@ final class ScreenShareController {
                 self.isScreenSharing = false
                 self.cameraController.isScreenSharing = false
                 self.onStateChanged(false)
-                if self.cameraController.availableCameraModes.isEmpty == false {
+                if self.cameraController.canCaptureVideo {
                     _ = self.cameraController.restartVideoCapturer(source: previousSource)
                 }
                 self.cameraController.notifyCameraModeAndFlash()
@@ -192,7 +192,7 @@ final class ScreenShareController {
             let restoreSource = cameraController.preScreenShareCameraSource
             cameraController.preScreenShareCameraSource = .selfie
 #if canImport(WebRTC)
-            if cameraController.availableCameraModes.isEmpty {
+            if !cameraController.canCaptureVideo {
                 setLocalVideoTrackEnabled(false)
                 cameraController.localCameraSource = restoreSource
                 cameraController.notifyCameraModeAndFlash()

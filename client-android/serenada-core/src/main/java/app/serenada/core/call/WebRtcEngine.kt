@@ -263,19 +263,13 @@ internal class WebRtcEngine(
         localVideoTrack?.setEnabled(false)
         localAudioTrack?.setEnabled(false)
         cameraController.disposeVideoCapturer()
-        localVideoTrack?.let { track ->
-            localSinks.forEach { sink -> track.removeSink(sink) }
-            track.dispose()
-        }
+        disposeLocalVideoTrack()
         // Tear down the primer before disposing its audio track — closing the
         // PC first releases the sender's reference to the track.
         audioPipelinePrimer.stop()
         localAudioTrack?.dispose()
-        videoSource?.dispose()
-        videoSource = null
         audioSource?.dispose()
         audioSource = null
-        localVideoTrack = null
         localAudioTrack = null
     }
 
@@ -389,11 +383,10 @@ internal class WebRtcEngine(
     override fun startScreenShare(intent: Intent): Boolean {
         if (!videoMediaEnabled) return false
         val createdVideoTrack = localVideoTrack == null
-        ensureVideoSource()
         ensureLocalVideoTrack(enabled = false)
         val started = screenShareController.startScreenShare(intent)
         if (!started) {
-            if (createdVideoTrack && cameraController.availableCameraModes.isEmpty()) {
+            if (createdVideoTrack && !cameraController.canCaptureVideo) {
                 disposeLocalVideoTrack()
             }
             return false
@@ -407,7 +400,7 @@ internal class WebRtcEngine(
 
     override fun stopScreenShare(): Boolean {
         val stopped = screenShareController.stopScreenShare()
-        if (stopped && cameraController.availableCameraModes.isEmpty()) {
+        if (stopped && !cameraController.canCaptureVideo) {
             localVideoTrack?.setEnabled(false)
             peerSlots.forEach { slot ->
                 slot.attachLocalTracks(localAudioTrack, null)

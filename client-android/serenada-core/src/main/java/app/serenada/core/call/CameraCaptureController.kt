@@ -84,6 +84,9 @@ internal class CameraCaptureController(
 
     val availableCameraModes: List<LocalCameraMode> = availableCameraModes
 
+    /** True when this device has at least one camera mode available to capture video with. */
+    val canCaptureVideo: Boolean get() = availableCameraModes.isNotEmpty()
+
     init {
         currentCameraSource =
             cameraSourceFromMode(this.availableCameraModes.firstOrNull() ?: LocalCameraMode.SELFIE)
