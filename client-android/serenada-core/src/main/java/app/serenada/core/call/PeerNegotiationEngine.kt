@@ -17,7 +17,6 @@ internal class PeerNegotiationEngine(
     private val clock: SessionClock,
     // State readers
     private val getClientId: () -> String?,
-    private val getHostCid: () -> String?,
     // When true, the initial-negotiation offer-timeout is deferred while the host peer awaits
     // its FIRST answer (e.g. PSTN, where the answer is gated on human pickup and can take far
     // longer than OFFER_TIMEOUT_MS). Normal offer-timeout resumes after the first answer.
@@ -571,6 +570,14 @@ internal class PeerNegotiationEngine(
 
     // --- Offer Logic ---
 
+    /**
+     * True while a deferred-answer call (e.g. PSTN) is awaiting its first answer from [remoteCid].
+     * Gates the initial offer-timeout/ICE-restart/media-restart suppression; renegotiations after
+     * the first answer behave normally.
+     */
+    private fun isDeferringInitialNegotiation(remoteCid: String): Boolean =
+        deferInitialAnswer() && remoteCid !in initialAnswerReceivedCids
+
     private fun shouldIOffer(remoteCid: String, roomState: RoomState? = getCurrentRoomState()): Boolean {
         val myCid = getClientId() ?: return false
         roomState ?: return false
@@ -580,9 +587,7 @@ internal class PeerNegotiationEngine(
         // (For PSTN the app forces itself host via hostPeerId, so this elects the app.)
         if (deferInitialAnswer()) {
             val participantCids = roomState.participants.map { it.cid }.toSet()
-            val hostCid = roomState.hostCid
-                .takeIf { it in participantCids }
-                ?: getHostCid()?.takeIf { it in participantCids }
+            val hostCid = roomState.hostCid.takeIf { it in participantCids }
             if (participantCids.size <= 2 && hostCid != null) {
                 return myCid == hostCid
             }
@@ -668,7 +673,7 @@ internal class PeerNegotiationEngine(
             handleLocalTrackNegotiationRequest(slot, remoteCid)
             return
         }
-        if (deferInitialAnswer() && remoteCid !in initialAnswerReceivedCids) {
+        if (isDeferringInitialNegotiation(remoteCid)) {
             // Don't recreate the peer and re-offer before the first answer on a deferred call; a
             // (possibly out-of-order or bridge-sent) media-restart here would replace the in-flight
             // initial offer the bridge will answer at pickup. Resumes after the first answer.
@@ -805,7 +810,7 @@ internal class PeerNegotiationEngine(
     private fun scheduleOfferTimeout(remoteCid: String) {
         val slot = getSlot(remoteCid) ?: return
         clearOfferTimeout(remoteCid)
-        if (deferInitialAnswer() && remoteCid !in initialAnswerReceivedCids) {
+        if (isDeferringInitialNegotiation(remoteCid)) {
             // Deferred-answer call (e.g. PSTN): the first answer may arrive long after
             // OFFER_TIMEOUT_MS (human pickup). Don't arm the re-offer/ICE-restart timer for the
             // initial negotiation; otherwise we'd roll back and re-offer while merely waiting for
@@ -842,7 +847,7 @@ internal class PeerNegotiationEngine(
 
     fun scheduleIceRestart(remoteCid: String, reason: String, delayMs: Long) {
         val slot = getSlot(remoteCid) ?: return
-        if (deferInitialAnswer() && remoteCid !in initialAnswerReceivedCids) {
+        if (isDeferringInitialNegotiation(remoteCid)) {
             // See triggerIceRestart: no re-offers/ICE-restarts before the first answer on a
             // deferred-answer call. Don't even schedule one.
             return
@@ -875,7 +880,7 @@ internal class PeerNegotiationEngine(
 
     private fun triggerIceRestart(remoteCid: String, reason: String) {
         val slot = getSlot(remoteCid) ?: return
-        if (deferInitialAnswer() && remoteCid !in initialAnswerReceivedCids) {
+        if (isDeferringInitialNegotiation(remoteCid)) {
             // Deferred-answer call awaiting its first answer (e.g. PSTN ringing): suppress the
             // re-offer/ICE-restart. Rolling back HAVE_LOCAL_OFFER and re-offering now (e.g. on a
             // signaling reconnect) would invalidate the in-flight initial offer the bridge will

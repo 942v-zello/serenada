@@ -505,7 +505,6 @@ class SerenadaSession internal constructor(
             handler = handler,
             clock = this.clock,
             getClientId = { clientId },
-            getHostCid = { hostCid },
             deferInitialAnswer = { config.deferInitialAnswer },
             getParticipantCount = { _state.value.participantCount },
             getCurrentRoomState = { currentRoomState },

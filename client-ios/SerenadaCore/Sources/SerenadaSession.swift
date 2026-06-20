@@ -1975,7 +1975,6 @@ public final class SerenadaSession: ObservableObject {
         peerNegotiationEngine = PeerNegotiationEngine(
             clock: clock,
             getClientId: { [weak self] in self?.clientId },
-            getHostCid: { [weak self] in self?.hostCid },
             deferInitialAnswer: { [weak self] in self?.config.deferInitialAnswer ?? false },
             getInternalPhase: { [weak self] in self?.internalPhase ?? .idle },
             getParticipantCount: { [weak self] in self?.participantCount ?? 0 },

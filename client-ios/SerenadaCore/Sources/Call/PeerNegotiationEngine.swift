@@ -9,7 +9,6 @@ final class PeerNegotiationEngine {
 
     // State readers
     private let getClientId: () -> String?
-    private let getHostCid: () -> String?
     private let deferInitialAnswer: () -> Bool
     private let getInternalPhase: () -> CallPhase
     private let getParticipantCount: () -> Int
@@ -65,7 +64,6 @@ final class PeerNegotiationEngine {
     init(
         clock: SessionClock,
         getClientId: @escaping () -> String?,
-        getHostCid: @escaping () -> String?,
         deferInitialAnswer: @escaping () -> Bool = { false },
         getInternalPhase: @escaping () -> CallPhase,
         getParticipantCount: @escaping () -> Int,
@@ -95,7 +93,6 @@ final class PeerNegotiationEngine {
     ) {
         self.clock = clock
         self.getClientId = getClientId
-        self.getHostCid = getHostCid
         self.deferInitialAnswer = deferInitialAnswer
         self.getInternalPhase = getInternalPhase
         self.getParticipantCount = getParticipantCount
@@ -638,6 +635,13 @@ final class PeerNegotiationEngine {
 
     // MARK: - Offer Logic
 
+    /// True while a deferred-answer call (e.g. PSTN) is awaiting its first answer from `remoteCid`.
+    /// Gates the initial offer-timeout/ICE-restart/media-restart suppression; renegotiations after
+    /// the first answer behave normally.
+    private func isDeferringInitialNegotiation(_ remoteCid: String) -> Bool {
+        deferInitialAnswer() && !initialAnswerReceivedCids.contains(remoteCid)
+    }
+
     private func shouldIOffer(remoteCid: String, roomState: RoomState? = nil) -> Bool {
         guard let myCid = getClientId() else { return false }
         let activeRoomState = roomState ?? getCurrentRoomState()
@@ -647,14 +651,7 @@ final class PeerNegotiationEngine {
         }
         if deferInitialAnswer(), let activeRoomState {
             let participantCids = Set(activeRoomState.participants.map(\.cid))
-            let hostCid: String?
-            if participantCids.contains(activeRoomState.hostCid) {
-                hostCid = activeRoomState.hostCid
-            } else if let fallbackHostCid = getHostCid(), participantCids.contains(fallbackHostCid) {
-                hostCid = fallbackHostCid
-            } else {
-                hostCid = nil
-            }
+            let hostCid = participantCids.contains(activeRoomState.hostCid) ? activeRoomState.hostCid : nil
             if participantCids.count <= 2, let hostCid {
                 return myCid == hostCid
             }
@@ -769,7 +766,7 @@ final class PeerNegotiationEngine {
             handleLocalTrackNegotiationRequest(slot: slot, remoteCid: remoteCid)
             return
         }
-        if deferInitialAnswer(), !initialAnswerReceivedCids.contains(remoteCid) {
+        if isDeferringInitialNegotiation(remoteCid) {
             logger?.log(.debug, tag: "PeerNegotiationEngine", "Ignoring media restart for \(remoteCid) before first answer")
             return
         }
@@ -912,7 +909,7 @@ final class PeerNegotiationEngine {
     ) {
         clearOfferTimeout(remoteCid: remoteCid)
         guard let slot = getSlot(remoteCid) else { return }
-        if deferInitialAnswer(), !initialAnswerReceivedCids.contains(remoteCid) {
+        if isDeferringInitialNegotiation(remoteCid) {
             logger?.log(.debug, tag: "PeerNegotiationEngine", "Deferring initial offer timeout for \(remoteCid)")
             return
         }
@@ -963,7 +960,7 @@ final class PeerNegotiationEngine {
 
     func scheduleIceRestart(remoteCid: String, reason: String, delayMs: Int) {
         guard let slot = getSlot(remoteCid) else { return }
-        if deferInitialAnswer(), !initialAnswerReceivedCids.contains(remoteCid) {
+        if isDeferringInitialNegotiation(remoteCid) {
             return
         }
         if !canOffer(slot: slot) {
@@ -1010,7 +1007,7 @@ final class PeerNegotiationEngine {
     private func triggerIceRestart(remoteCid: String, reason: String) {
         guard let slot = getSlot(remoteCid) else { return }
         slot.cancelIceRestartTask()
-        if deferInitialAnswer(), !initialAnswerReceivedCids.contains(remoteCid) {
+        if isDeferringInitialNegotiation(remoteCid) {
             logger?.log(.debug, tag: "PeerNegotiationEngine", "Suppressing ICE restart for \(remoteCid) before first answer (\(reason))")
             return
         }

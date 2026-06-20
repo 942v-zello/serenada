@@ -659,6 +659,9 @@ export class MediaEngine {
         for (const cid of Array.from(this.mediaRestartHandledAtByCid.keys())) {
             if (!remoteCids.has(cid)) this.mediaRestartHandledAtByCid.delete(cid);
         }
+        for (const cid of Array.from(this.initialAnswerReceivedCids)) {
+            if (!remoteCids.has(cid)) this.initialAnswerReceivedCids.delete(cid);
+        }
 
         for (const peer of remotePeers) {
             const previousStatus = this.participantConnectionStatus.get(peer.cid);
@@ -868,6 +871,15 @@ export class MediaEngine {
         return !!participant && participant.connectionStatus !== 'suspended';
     }
 
+    /**
+     * True while a deferred-answer call (e.g. PSTN) is awaiting its first answer from `remoteCid`.
+     * Gates the initial offer-timeout/ICE-restart/media-restart suppression; renegotiations after
+     * the first answer behave normally.
+     */
+    private isDeferringInitialNegotiation(remoteCid: string): boolean {
+        return this.deferInitialAnswer && !this.initialAnswerReceivedCids.has(remoteCid);
+    }
+
     private nextOfferId(remoteCid: string): string {
         this.offerSequence += 1;
         return `${this.clientId ?? ''}:${remoteCid}:${Date.now()}:${this.offerSequence}`;
@@ -918,7 +930,7 @@ export class MediaEngine {
             this.sendSignalingMessage('offer', { sdp: offer.sdp, offerId }, remoteCid);
 
             if (peer.offerTimeout) window.clearTimeout(peer.offerTimeout);
-            if (this.deferInitialAnswer && !this.initialAnswerReceivedCids.has(remoteCid)) {
+            if (this.isDeferringInitialNegotiation(remoteCid)) {
                 this.logger?.log('debug', 'WebRTC', `[${remoteCid}] Deferring initial offer timeout`);
                 return;
             }
@@ -951,7 +963,7 @@ export class MediaEngine {
     private scheduleIceRestart(remoteCid: string, reason: string, delayMs: number): void {
         const peer = this.peers.get(remoteCid);
         if (!peer) return;
-        if (this.deferInitialAnswer && !this.initialAnswerReceivedCids.has(remoteCid)) {
+        if (this.isDeferringInitialNegotiation(remoteCid)) {
             return;
         }
         if (!this.isSignalingConnected || !this.isParticipantActive(remoteCid)) { peer.pendingIceRestart = true; return; }
@@ -972,7 +984,7 @@ export class MediaEngine {
     private async triggerIceRestart(remoteCid: string, reason: string): Promise<void> {
         const peer = this.peers.get(remoteCid);
         if (!peer) return;
-        if (this.deferInitialAnswer && !this.initialAnswerReceivedCids.has(remoteCid)) {
+        if (this.isDeferringInitialNegotiation(remoteCid)) {
             this.logger?.log('debug', 'WebRTC', `[${remoteCid}] Suppressing ICE restart before first answer (${reason})`);
             return;
         }
@@ -1896,7 +1908,7 @@ export class MediaEngine {
             await this.handlePeerLocalTrackNegotiationRequest(fromCid);
             return;
         }
-        if (this.deferInitialAnswer && !this.initialAnswerReceivedCids.has(fromCid)) {
+        if (this.isDeferringInitialNegotiation(fromCid)) {
             this.logger?.log('debug', 'WebRTC', `[${fromCid}] Ignoring media restart before first answer`);
             return;
         }
