@@ -655,15 +655,24 @@ public final class SerenadaSession: ObservableObject {
     public func startScreenShare() {
         guard config.videoMediaEnabled else { return }
         guard !diagnostics.isScreenSharing else { return }
-        _ = webRtcEngine.startScreenShare { [weak self] started in
+        let wasVideoPreferred = userPreferredVideoEnabled
+        userPreferredVideoEnabled = true
+        let startedRequest = webRtcEngine.startScreenShare { [weak self] started in
             Task { @MainActor in
-                guard let self, started else { return }
+                guard let self else { return }
+                guard started else {
+                    self.userPreferredVideoEnabled = wasVideoPreferred
+                    return
+                }
                 self.commitSnapshot { s, d in
                     d.isScreenSharing = true; s.localParticipant.cameraMode = .screenShare; d.cameraZoomFactor = 1
                 }
                 self.signalingMessageRouter?.broadcastContentState(active: true, contentType: ContentTypeWire.screenShare)
                 self.applyLocalVideoPreference()
             }
+        }
+        if !startedRequest {
+            userPreferredVideoEnabled = wasVideoPreferred
         }
     }
 

@@ -1080,6 +1080,9 @@ export class MediaEngine {
             }
             throw err;
         }
+        if (!this.videoMediaEnabled) {
+            this.rejectRemoteVideoTransceivers(peer.pc, fromCid);
+        }
         peer.acceptedRemoteOfferId = offerId;
         peer.currentNegotiationId = offerId;
         if (peer.offerTimeout) { window.clearTimeout(peer.offerTimeout); peer.offerTimeout = null; }
@@ -1475,11 +1478,30 @@ export class MediaEngine {
         }
     }
 
+    private rejectRemoteVideoTransceivers(pc: RTCPeerConnection, remoteCid: string): void {
+        for (const transceiver of pc.getTransceivers().filter(candidate => this.isTransceiverKind(candidate, 'video'))) {
+            try {
+                if (transceiver.direction !== 'inactive' && transceiver.direction !== 'stopped') {
+                    transceiver.direction = 'inactive';
+                }
+            } catch (err) {
+                this.logger?.log('warning', 'WebRTC', `[${remoteCid}] Failed to reject remote video transceiver: ${formatError(err)}`);
+            }
+            if (transceiver.sender.track?.kind === 'video') {
+                void transceiver.sender.replaceTrack(null).catch(err => {
+                    this.logger?.log('warning', 'WebRTC', `[${remoteCid}] Failed to detach rejected video sender: ${formatError(err)}`);
+                });
+            }
+        }
+    }
+
     private findTransceiver(pc: RTCPeerConnection, kind: 'audio' | 'video'): RTCRtpTransceiver | undefined {
-        const transceivers = pc.getTransceivers().filter(transceiver => (
-            transceiver.receiver.track?.kind === kind || transceiver.sender.track?.kind === kind
-        ));
+        const transceivers = pc.getTransceivers().filter(transceiver => this.isTransceiverKind(transceiver, kind));
         return transceivers.find(transceiver => transceiver.mid !== null) ?? transceivers[0];
+    }
+
+    private isTransceiverKind(transceiver: RTCRtpTransceiver, kind: 'audio' | 'video'): boolean {
+        return transceiver.receiver.track?.kind === kind || transceiver.sender.track?.kind === kind;
     }
 
     private async attachLocalTracksToPeer(remoteCid: string, peer: PeerState, stream: MediaStream): Promise<void> {

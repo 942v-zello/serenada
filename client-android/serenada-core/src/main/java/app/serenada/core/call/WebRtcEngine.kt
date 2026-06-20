@@ -240,7 +240,11 @@ internal class WebRtcEngine(
     }
 
     private fun ensureLocalVideoTrack(enabled: Boolean): VideoTrack {
-        return localVideoTrack ?: peerConnectionFactory.createVideoTrack("ARDAMSv0", ensureVideoSource()).also { track ->
+        localVideoTrack?.let { track ->
+            track.setEnabled(enabled)
+            return track
+        }
+        return peerConnectionFactory.createVideoTrack("ARDAMSv0", ensureVideoSource()).also { track ->
             track.setEnabled(enabled)
             localSinks.forEach { sink -> track.addSink(sink) }
             localVideoTrack = track
