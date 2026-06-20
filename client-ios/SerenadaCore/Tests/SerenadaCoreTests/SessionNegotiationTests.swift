@@ -26,7 +26,7 @@ final class SessionNegotiationTests: XCTestCase {
     }
 
     private func waitUntil(
-        attempts: Int = 32,
+        attempts: Int = 100,
         condition: () -> Bool
     ) async {
         for _ in 0..<attempts {
@@ -34,12 +34,17 @@ final class SessionNegotiationTests: XCTestCase {
                 return
             }
             await harness.yieldToMainActor()
+            // A short real-time nap lets freshly-spawned `Task { @MainActor in ... }`
+            // work (connection-state callbacks, the deferred ICE-restart chain) drain
+            // even when the cooperative executor is busy during a full-suite run, where
+            // a fixed count of `Task.yield()`s alone was not always enough.
+            try? await Task.sleep(nanoseconds: 1_000_000)
         }
     }
 
     private func waitForIceRestartTask(
         _ fakeSlot: FakePeerConnectionSlot?,
-        attempts: Int = 32
+        attempts: Int = 100
     ) async {
         await waitUntil(attempts: attempts) {
             fakeSlot?.iceRestartTask != nil
@@ -350,7 +355,7 @@ final class SessionNegotiationTests: XCTestCase {
         XCTAssertNotNil(fakeSlot?.iceRestartTask, "ICE restart should be deferred, not dropped")
 
         await harness.fakeClock.advance(byMs: Int64(WebRtcResilience.iceRestartCooldownMs))
-        await harness.yieldToMainActor()
+        await waitUntil { (fakeSlot?.createOfferCalls ?? 0) > offersBefore }
 
         // triggerIceRestart clears the task when the deferred sleep completes;
         // an unclamped deferral would still be parked here (10x the cooldown away).
