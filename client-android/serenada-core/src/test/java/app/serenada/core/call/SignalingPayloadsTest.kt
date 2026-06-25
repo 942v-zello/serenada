@@ -173,6 +173,28 @@ class SignalingPayloadsTest {
     }
 
     @Test
+    fun toContentStatePayload_parsesRevision() {
+        val json = JSONObject().apply {
+            put("from", "C-peer")
+            put("active", true)
+            put("contentType", "screenShare")
+            put("revision", 7)
+        }
+        val payload = json.toContentStatePayload()
+        assertEquals(7L, payload!!.revision)
+    }
+
+    @Test
+    fun toContentStatePayload_missingRevisionIsNull() {
+        val json = JSONObject().apply {
+            put("from", "C-peer")
+            put("active", true)
+        }
+        val payload = json.toContentStatePayload()
+        assertNull(payload!!.revision)
+    }
+
+    @Test
     fun toContentStatePayload_nullReturnsNull() {
         assertNull((null as JSONObject?).toContentStatePayload())
     }
@@ -224,5 +246,110 @@ class SignalingPayloadsTest {
     fun toParticipantList_nullReturnsEmpty() {
         val result = (null as JSONArray?).toParticipantList()
         assertTrue(result.isEmpty())
+    }
+
+    @Test
+    fun toParticipantList_parsesCapabilitiesAndMediaPolicy() {
+        val arr = JSONArray().apply {
+            put(JSONObject().apply {
+                put("cid", "C-1")
+                put("capabilities", JSONObject().apply {
+                    put("independentContentVideo", true)
+                    put("trickleIce", true) // unknown-to-model key tolerated
+                })
+                put("mediaPolicy", JSONObject().apply { put("videoMediaEnabled", false) })
+            })
+        }
+        val p = arr.toParticipantList().single()
+        assertTrue(p.capabilities!!.independentContentVideo)
+        assertFalse(p.mediaPolicy!!.videoMediaEnabled)
+    }
+
+    @Test
+    fun toParticipantList_capabilitiesDefaultsWhenAbsent() {
+        val arr = JSONArray().apply {
+            put(JSONObject().apply {
+                put("cid", "C-1")
+                // Present but empty capabilities/mediaPolicy objects.
+                put("capabilities", JSONObject())
+                put("mediaPolicy", JSONObject())
+            })
+        }
+        val p = arr.toParticipantList().single()
+        assertFalse("independentContentVideo defaults to false", p.capabilities!!.independentContentVideo)
+        assertTrue("videoMediaEnabled defaults to true", p.mediaPolicy!!.videoMediaEnabled)
+    }
+
+    @Test
+    fun toParticipantList_capabilitiesAndPolicyNullWhenObjectsAbsent() {
+        val arr = JSONArray().apply {
+            put(JSONObject().apply { put("cid", "C-1") })
+        }
+        val p = arr.toParticipantList().single()
+        assertNull(p.capabilities)
+        assertNull(p.mediaPolicy)
+    }
+
+    @Test
+    fun toParticipantList_parsesContentStateRevision() {
+        val arr = JSONArray().apply {
+            put(JSONObject().apply {
+                put("cid", "C-1")
+                put("contentState", JSONObject().apply {
+                    put("active", true)
+                    put("contentType", "screenShare")
+                    put("revision", 3)
+                })
+            })
+        }
+        val p = arr.toParticipantList().single()
+        val content = p.contentState!!
+        assertTrue(content.active)
+        assertEquals(3L, content.revision)
+    }
+
+    @Test
+    fun toContentStatePayload_ignoresMalformedRevision() {
+        val payload = JSONObject().apply {
+            put("from", "C-1")
+            put("active", true)
+            put("revision", "bad")
+        }.toContentStatePayload()
+
+        assertEquals("C-1", payload!!.fromCid)
+        assertTrue(payload.active)
+        assertNull(payload.revision)
+    }
+
+    @Test
+    fun toParticipantList_ignoresMalformedContentStateRevision() {
+        val arr = JSONArray().apply {
+            put(JSONObject().apply {
+                put("cid", "C-1")
+                put("contentState", JSONObject().apply {
+                    put("active", true)
+                    put("revision", 1.5)
+                })
+            })
+        }
+        val content = arr.toParticipantList().single().contentState!!
+        assertTrue(content.active)
+        assertNull(content.revision)
+    }
+
+    @Test
+    fun toParticipantList_ignoresUnsafeContentStateRevision() {
+        val arr = JSONArray().apply {
+            put(JSONObject().apply {
+                put("cid", "C-1")
+                put("contentState", JSONObject().apply {
+                    put("active", true)
+                    put("revision", 9_007_199_254_740_992L)
+                })
+            })
+        }
+        val content = arr.toParticipantList().single().contentState!!
+        assertTrue(content.active)
+        assertNull(content.revision)
     }
 }

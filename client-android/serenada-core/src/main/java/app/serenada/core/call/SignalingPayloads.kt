@@ -4,6 +4,8 @@ import app.serenada.core.ParticipantSignalingStatus
 import org.json.JSONArray
 import org.json.JSONObject
 
+private const val MAX_SAFE_CONTENT_REVISION = 9_007_199_254_740_991L
+
 /**
  * Typed payload data classes for inbound signaling messages.
  * Replaces raw JSONObject parsing scattered across SerenadaSession.
@@ -38,6 +40,8 @@ internal data class ContentStatePayload(
     val fromCid: String,
     val active: Boolean,
     val contentType: String?,
+    /** Per-`(cid, sid)` monotonic revision; absent on older senders. */
+    val revision: Long? = null,
 )
 
 internal data class MediaStatePayload(
@@ -132,12 +136,13 @@ internal fun JSONObject?.toReconnectTokenRefreshedPayload(): ReconnectTokenRefre
 internal fun JSONObject?.toContentStatePayload(): ContentStatePayload? {
     this ?: return null
     val fromCid = optString("from").ifBlank { return null }
-    val active = optBoolean("active")
+    val active = opt("active") as? Boolean ?: return null
     val contentType = if (active) optString("contentType").ifBlank { null } else null
     return ContentStatePayload(
         fromCid = fromCid,
         active = active,
         contentType = contentType,
+        revision = optRevision(),
     )
 }
 
@@ -177,6 +182,8 @@ internal fun JSONArray?.toParticipantList(): List<Participant> {
                 videoEnabled = if (p.has("videoEnabled")) p.optBoolean("videoEnabled") else null,
                 signalingStatus = status,
                 contentState = contentState,
+                capabilities = p.optJSONObject("capabilities")?.toParticipantCapabilities(),
+                mediaPolicy = p.optJSONObject("mediaPolicy")?.toParticipantMediaPolicy(),
             ))
         }
     }
@@ -184,13 +191,40 @@ internal fun JSONArray?.toParticipantList(): List<Participant> {
 }
 
 private fun JSONObject.toParticipantContentState(): ParticipantContentState? {
-    if (!has("active")) return null
-    val active = optBoolean("active")
+    val active = opt("active") as? Boolean ?: return null
     val rawType = optString("contentType").ifBlank { null }
     return ParticipantContentState(
         active = active,
         contentType = if (active) rawType else null,
         updatedAtMs = if (has("updatedAtMs")) optLong("updatedAtMs", -1).takeIf { it >= 0 } else null,
         epoch = if (has("epoch")) optLong("epoch", -1).takeIf { it >= 0 } else null,
+        revision = optRevision(),
     )
 }
+
+internal fun JSONObject.optRevision(): Long? {
+    if (!has("revision") || isNull("revision")) return null
+    return when (val value = opt("revision")) {
+        is Int -> value.toLong()
+        is Long -> value
+        else -> null
+    }?.takeIf { it in 0..MAX_SAFE_CONTENT_REVISION }
+}
+
+/**
+ * Parses the allowlisted `capabilities` object. Unknown keys are ignored;
+ * missing known keys fall back to their documented defaults.
+ */
+private fun JSONObject.toParticipantCapabilities(): ParticipantCapabilities =
+    ParticipantCapabilities(
+        independentContentVideo = optBoolean("independentContentVideo", false),
+    )
+
+/**
+ * Parses the allowlisted `mediaPolicy` object. A missing `videoMediaEnabled`
+ * defaults to true (no deployed audio-only client predates this signal).
+ */
+private fun JSONObject.toParticipantMediaPolicy(): ParticipantMediaPolicy =
+    ParticipantMediaPolicy(
+        videoMediaEnabled = optBoolean("videoMediaEnabled", true),
+    )

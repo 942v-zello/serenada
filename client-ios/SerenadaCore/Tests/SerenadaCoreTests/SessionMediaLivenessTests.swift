@@ -40,7 +40,7 @@ final class SessionMediaLivenessTests: XCTestCase {
         await harness.yieldToMainActor()
         await harness.yieldToMainActor()
 
-        // Baseline tick: bytes still 0 → no flow.
+        // Baseline tick: bytes still 0 -> empty heartbeat.
         let slot = harness.fakeMedia.fakeSlots["remote"]
         slot?.inboundBytesSample = 0
         await tickInterval()
@@ -64,7 +64,7 @@ final class SessionMediaLivenessTests: XCTestCase {
         }
     }
 
-    func testSkipsBroadcastWhenNoPeerIsCurrentlyFlowing() async {
+    func testBroadcastsEmptyHeartbeatWhenNoPeerIsCurrentlyFlowing() async {
         await harness.advanceToInCallWithTurn(
             localCid: "alpha",
             remoteCid: "remote",
@@ -79,8 +79,17 @@ final class SessionMediaLivenessTests: XCTestCase {
         await tickInterval()
         await tickInterval()
 
-        XCTAssertEqual(livenessBroadcasts().count, 0)
-        XCTAssertGreaterThan(harness.fakeMedia.fakeSlots["remote"]?.collectInboundBytesCalls ?? 0, 0)
+        let broadcasts = livenessBroadcasts()
+        XCTAssertFalse(broadcasts.isEmpty)
+        if case let .array(items) = broadcasts.last?.payload?["cids"] {
+            XCTAssertEqual(items.count, 0)
+        } else {
+            XCTFail("Expected `cids` array in payload")
+        }
+        let slot = harness.fakeMedia.fakeSlots["remote"]
+        XCTAssertGreaterThan(slot?.collectInboundLivenessCalls ?? 0, 0)
+        XCTAssertEqual(slot?.collectInboundBytesCalls ?? 0, 0, "timer should not run a second bytes-only stats pass")
+        XCTAssertEqual(slot?.collectInboundRoleBytesCalls ?? 0, 0, "timer should not run a second role-only stats pass")
     }
 
     func testPausesWhileTransportDisconnectedAndResumesAfterReconnect() async {

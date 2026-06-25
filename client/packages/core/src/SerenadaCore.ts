@@ -129,6 +129,12 @@ export class SerenadaCore {
             destroy: noop,
             get localStream() { return null; },
             get remoteStreams() { return emptyMap; },
+            getRemoteCameraStream: () => undefined,
+            getRemoteContentStream: () => undefined,
+            getRemoteStream: () => undefined,
+            getLocalContentStream: () => null,
+            get independentContentVideoEnabled() { return false; },
+            getRemoteIndependentContentVideo: () => false,
             get callStats() { return null; },
             get callQualitySummary() { return null; },
             get hasMultipleCameras() { return false; },
@@ -147,6 +153,8 @@ export class SerenadaCore {
                 serverHost: this.resolvedConfig.serverHost,
                 transports: this.config.transports,
                 logger: this.config.logger,
+                videoMediaEnabled: this.config.videoMediaEnabled,
+                enableIndependentContentVideo: this.config.enableIndependentContentVideo,
             });
         }
         return this.resolvedConfig.signalingProvider as SignalingProvider;

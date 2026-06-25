@@ -1,4 +1,11 @@
-import type { ParticipantContentState, ReconnectOutcome, RoomParticipant, RoomState } from './types.js';
+import type {
+    ParticipantCapabilities,
+    ParticipantContentState,
+    ParticipantMediaPolicy,
+    ReconnectOutcome,
+    RoomParticipant,
+    RoomState,
+} from './types.js';
 
 export interface JoinedPayload {
     hostCid: string | null;
@@ -81,6 +88,12 @@ export interface IceCandidatePayload {
     offerId?: string;
 }
 
+export function parseContentRevision(raw: unknown): number | undefined {
+    return typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0
+        ? raw
+        : undefined;
+}
+
 function parseContentState(raw: unknown): ParticipantContentState | undefined {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
     const rec = raw as Record<string, unknown>;
@@ -90,7 +103,26 @@ function parseContentState(raw: unknown): ParticipantContentState | undefined {
         contentType: typeof rec.contentType === 'string' && rec.contentType !== '' ? rec.contentType : undefined,
         updatedAtMs: typeof rec.updatedAtMs === 'number' ? rec.updatedAtMs : undefined,
         epoch: typeof rec.epoch === 'number' ? rec.epoch : undefined,
+        revision: parseContentRevision(rec.revision),
     };
+}
+
+function parseCapabilities(raw: unknown): ParticipantCapabilities | undefined {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+    const rec = raw as Record<string, unknown>;
+    const result: ParticipantCapabilities = {};
+    if (typeof rec.trickleIce === 'boolean') result.trickleIce = rec.trickleIce;
+    if (typeof rec.maxParticipants === 'number') result.maxParticipants = rec.maxParticipants;
+    if (typeof rec.independentContentVideo === 'boolean') result.independentContentVideo = rec.independentContentVideo;
+    return result;
+}
+
+function parseMediaPolicy(raw: unknown): ParticipantMediaPolicy | undefined {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+    const rec = raw as Record<string, unknown>;
+    const result: ParticipantMediaPolicy = {};
+    if (typeof rec.videoMediaEnabled === 'boolean') result.videoMediaEnabled = rec.videoMediaEnabled;
+    return result;
 }
 
 function parseParticipants(raw: unknown): RoomParticipant[] | null {
@@ -111,6 +143,8 @@ function parseParticipants(raw: unknown): RoomParticipant[] | null {
             // is left undefined and treated as active downstream.
             connectionStatus: rec.connectionStatus === 'suspended' ? 'suspended' : undefined,
             contentState: parseContentState(rec.contentState),
+            capabilities: parseCapabilities(rec.capabilities),
+            mediaPolicy: parseMediaPolicy(rec.mediaPolicy),
         });
     }
     return result;
