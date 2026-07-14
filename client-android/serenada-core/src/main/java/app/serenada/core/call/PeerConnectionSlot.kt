@@ -618,13 +618,37 @@ internal class PeerConnectionSlot(
     }
 
     override fun closePeerConnection(deferDispose: Boolean) {
-        if (isClosing && peerConnection == null) return
+        val pc = detachPeerConnectionForClose() ?: return
+        closePeerConnectionSafely(pc)
+        disposePeerConnectionSafely(pc, deferDispose)
+    }
+
+    /**
+     * Detach session/UI state synchronously, then return only the native work for the terminal
+     * teardown thread. Mid-call replacement continues to use [closePeerConnection] so its close
+     * remains immediate while only native dispose is deferred.
+     */
+    fun prepareTerminalClose(): Runnable? {
+        val pc = detachPeerConnectionForClose() ?: return null
+        return Runnable {
+            closePeerConnectionSafely(pc)
+            disposePeerConnectionSafely(pc, deferDispose = false)
+        }
+    }
+
+    private fun detachPeerConnectionForClose(): PeerConnection? {
+        if (isClosing && peerConnection == null) return null
         isClosing = true
         offerTimeoutTask = null
         iceRestartTask = null
         isMakingOffer = false
         pendingIceRestart = false
         val pc = peerConnection
+        pc?.receivers?.forEach { receiver ->
+            val audioTrack = receiver.track() as? AudioTrack ?: return@forEach
+            runCatching { audioTrack.setVolume(0.0) }
+            runCatching { audioTrack.setEnabled(false) }
+        }
         peerConnection = null
         val track = remoteVideoTrack
         track?.removeSink(remoteVideoStateSink)
@@ -645,10 +669,7 @@ internal class PeerConnectionSlot(
         lastRealtimeStatsSample = null
         freezeSamples.clear()
         onRemoteVideoTrack(remoteCid, null)
-        pc?.let {
-            closePeerConnectionSafely(it)
-            disposePeerConnectionSafely(it, deferDispose)
-        }
+        return pc
     }
 
     override fun createOffer(
@@ -1551,23 +1572,39 @@ internal class PeerConnectionDisposeQueue(
         handler.postDelayed(wrapper, delayMs)
     }
 
+    /** Add terminal work that will run only when [flush] moves it to the dispose thread. */
+    @Synchronized
+    fun enqueueForFlush(dispose: () -> Unit) {
+        check(!isShutdown) { "Dispose queue is shut down" }
+        pending.add(Runnable(dispose))
+    }
+
     fun flush(shutdownAfterDrain: Boolean = false, onDrained: (() -> Unit)? = null) {
         val runnables = synchronized(this) {
             pending.toList().also { pending.clear() }
         }
         if (runnables.isEmpty()) {
-            onDrained?.invoke()
-            if (shutdownAfterDrain) shutdown()
+            try {
+                onDrained?.invoke()
+            } finally {
+                if (shutdownAfterDrain) shutdown()
+            }
             return
         }
         val remaining = AtomicInteger(runnables.size)
         for (runnable in runnables) {
             handler.removeCallbacks(runnable)
             flushHandler.post {
-                runnable.run()
-                if (remaining.decrementAndGet() == 0) {
-                    onDrained?.invoke()
-                    if (shutdownAfterDrain) shutdown()
+                try {
+                    runCatching { runnable.run() }
+                } finally {
+                    if (remaining.decrementAndGet() == 0) {
+                        try {
+                            onDrained?.invoke()
+                        } finally {
+                            if (shutdownAfterDrain) shutdown()
+                        }
+                    }
                 }
             }
         }

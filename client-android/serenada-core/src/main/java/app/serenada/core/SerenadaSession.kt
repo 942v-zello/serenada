@@ -60,6 +60,9 @@ import app.serenada.core.call.SignalingMessage
 import app.serenada.core.call.WebRtcEngine
 import app.serenada.core.call.WebRtcResilienceConstants
 import app.serenada.core.call.CameraCaptureController
+import app.serenada.core.call.PROCESS_TEARDOWN_HANDOFF_TIMEOUT_MS
+import app.serenada.core.call.audioCoordinatorTeardownFence
+import app.serenada.core.call.terminalMediaTeardownFence
 import app.serenada.core.call.toContentStatePayload
 import app.serenada.core.network.CoreApiClient
 import app.serenada.core.network.SessionAPIClient
@@ -855,7 +858,12 @@ class SerenadaSession internal constructor(
 
     // --- Public API ---
 
-    /** Leave the call gracefully. The other participant stays in the room. */
+    /**
+     * Leave the call gracefully. The other participant stays in the room.
+     *
+     * Session state reaches [CallPhase.Idle] before this returns. Terminal native media resource
+     * release may finish asynchronously so it cannot block the main thread.
+     */
     fun leave() {
         assertMainThread()
         if (_state.value.phase == CallPhase.Idle) return
@@ -1305,6 +1313,22 @@ class SerenadaSession internal constructor(
 
         acquirePerformanceLocks()
         providerScope.launch {
+            val previousMediaReleased =
+                terminalMediaTeardownFence.awaitPending(PROCESS_TEARDOWN_HANDOFF_TIMEOUT_MS)
+            val previousAudioRestored =
+                audioCoordinatorTeardownFence.awaitPending(PROCESS_TEARDOWN_HANDOFF_TIMEOUT_MS)
+            if (!previousMediaReleased || !previousAudioRestored) {
+                logger?.log(
+                    SerenadaLogLevel.ERROR,
+                    "Session",
+                    "Previous call teardown timed out before media activation",
+                )
+                handleError(CallError.Unknown("Previous call teardown timed out"))
+                return@launch
+            }
+            if (_state.value.phase != CallPhase.Joining || joinFlowCoordinator.joinAttemptSerial != joinAttemptId) {
+                return@launch
+            }
             try {
                 withTimeout(WebRtcResilienceConstants.AUDIO_COORDINATOR_TIMEOUT_MS) {
                     audioCoordinatorMutex.withLock {
@@ -1321,7 +1345,16 @@ class SerenadaSession internal constructor(
                 handleError(CallError.Unknown(e.message ?: "Audio session activation failed"))
                 return@launch
             }
-            if (!isActive) return@launch
+            if (
+                !isActive ||
+                _state.value.phase != CallPhase.Joining ||
+                joinFlowCoordinator.joinAttemptSerial != joinAttemptId
+            ) {
+                val deactivationJob =
+                    audioCoordinatorDeactivationJob ?: beginAudioCoordinatorDeactivation()
+                deactivationJob.join()
+                return@launch
+            }
             joinFlowCoordinator.scheduleJoinTimeout(roomId, joinAttemptId)
             try {
                 callAudioSessionController.activate()
@@ -2235,26 +2268,18 @@ class SerenadaSession internal constructor(
         joinFlowCoordinator.reset()
         peerNegotiationEngine.resetAll()
         iceFetchGeneration += 1
-        callAudioSessionController.deactivate()
-        val deactivationJob = audioCoordinatorScope.launch {
-            try {
-                withTimeout(WebRtcResilienceConstants.AUDIO_COORDINATOR_TIMEOUT_MS) {
-                    audioCoordinatorMutex.withLock {
-                        audioCoordinator.deactivateCallSession()
-                    }
-                }
-            } catch (e: TimeoutCancellationException) {
-                logger?.log(SerenadaLogLevel.WARNING, "Audio", "Audio session deactivation timed out")
-            } catch (e: Exception) {
-                if (e is kotlinx.coroutines.CancellationException) throw e
-                logger?.log(SerenadaLogLevel.WARNING, "Audio", "Failed to deactivate audio session: ${e.message}")
-            }
+        // Host-provided session controllers keep their established Main-thread callback. The SDK
+        // default coordinator synchronously detaches Main-owned callbacks inside
+        // deactivateCallSession(), then performs only the blocking AudioManager restore off Main.
+        if (callAudioSessionController !== defaultAudioCoordinator) {
+            callAudioSessionController.deactivate()
         }
-        audioCoordinatorDeactivationJob = deactivationJob
+        val deactivationJob = beginAudioCoordinatorDeactivation()
         releasePerformanceLocks()
         stopRemoteVideoStatePolling()
         signalingProvider.disconnect()
-        peerSlots.values.forEach { it.closePeerConnection() }
+        // The media engine owns terminal peer teardown. Clearing the session map first makes
+        // late WebRTC callbacks stale while WebRtcEngine releases native resources off Main.
         peerSlots.clear()
         webRtcEngine.release()
         webRtcStatsExecutor?.shutdown()
@@ -2286,6 +2311,35 @@ class SerenadaSession internal constructor(
         if (clearRecovery) recoveryStorage.clear()
         providerScope.coroutineContext.cancelChildren()
         updateDiagnostics(CallDiagnostics())
+        return deactivationJob
+    }
+
+    private fun beginAudioCoordinatorDeactivation(): Job {
+        val teardownTicket = audioCoordinatorTeardownFence.begin()
+        val deactivationJob = audioCoordinatorScope.launch {
+            try {
+                if (!teardownTicket.awaitTurn(PROCESS_TEARDOWN_HANDOFF_TIMEOUT_MS)) {
+                    logger?.log(
+                        SerenadaLogLevel.WARNING,
+                        "Audio",
+                        "Timed out waiting for the previous audio coordinator teardown",
+                    )
+                }
+                withTimeout(WebRtcResilienceConstants.AUDIO_COORDINATOR_TIMEOUT_MS) {
+                    audioCoordinatorMutex.withLock {
+                        audioCoordinator.deactivateCallSession()
+                    }
+                }
+            } catch (e: TimeoutCancellationException) {
+                logger?.log(SerenadaLogLevel.WARNING, "Audio", "Audio session deactivation timed out")
+            } catch (e: Exception) {
+                if (e is kotlinx.coroutines.CancellationException) throw e
+                logger?.log(SerenadaLogLevel.WARNING, "Audio", "Failed to deactivate audio session: ${e.message}")
+            } finally {
+                teardownTicket.complete()
+            }
+        }
+        audioCoordinatorDeactivationJob = deactivationJob
         return deactivationJob
     }
 
